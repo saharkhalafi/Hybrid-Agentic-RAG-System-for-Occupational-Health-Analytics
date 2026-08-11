@@ -414,6 +414,8 @@ ohse-document-intelligence/.cursor/
 # ── GCP credentials ───────────────────────────────────────────────
 config/gcp-key.json
 
+# ── Debug / analysis artifacts ─────────────────────────────────────
 ohse-document-intelligence/_analyze*_out.txt
 ohse-document-intelligence/_debug_*.txt
 ohse-document-intelligence/_page*_dump.txt
+staged-files.txt
