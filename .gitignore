@@ -1,0 +1,419 @@
+```gitignore
+# ================================================================
+# OHSE Document Intelligence
+# Git Ignore
+# ================================================================
+
+
+# ================================================================
+# SECRETS & CREDENTIALS
+# ================================================================
+
+.env
+.env.*
+!.env.example
+
+*.env
+*.secret
+*.secrets
+
+service-account.json
+service_account.json
+credentials.json
+credentials*.json
+*credentials*.json
+
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+
+# Google Cloud / GCP local credentials
+application_default_credentials.json
+
+
+# ================================================================
+# PYTHON
+# ================================================================
+
+.venv/
+venv/
+env/
+ENV/
+
+__pycache__/
+**/__pycache__/
+
+*.py[cod]
+*$py.class
+
+*.egg
+*.egg-info/
+.eggs/
+
+dist/
+build/
+pip-wheel-metadata/
+
+*.whl
+
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.pyre/
+.pytype/
+.hypothesis/
+
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+
+.pyright/
+.pyre/
+
+
+# ================================================================
+# IDE / EDITOR
+# ================================================================
+
+.idea/
+.vscode/
+
+*.swp
+*.swo
+*~
+
+.DS_Store
+Thumbs.db
+desktop.ini
+ehthumbs.db
+
+
+# ================================================================
+# LOGS / TEMPORARY FILES
+# ================================================================
+
+*.log
+*.tmp
+*.temp
+*.bak
+*.orig
+*.rej
+
+*.trace
+*.dump
+
+
+# ================================================================
+# DOCUMENTS / MEDIA
+#
+# Real source PDFs and generated document images should NOT
+# be committed to Git.
+# ================================================================
+
+*.pdf
+
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.webp
+*.tiff
+*.tif
+*.bmp
+*.svg
+*.ico
+*.heic
+
+
+# ================================================================
+# ARCHIVES / LARGE BINARIES
+# ================================================================
+
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.7z
+*.rar
+*.gz
+*.bz2
+*.xz
+
+*.exe
+*.dll
+*.so
+*.dylib
+*.bin
+
+*.pkl
+*.pickle
+*.joblib
+
+*.parquet
+*.feather
+
+*.h5
+*.hdf5
+
+*.sqlite
+*.sqlite3
+*.db
+
+
+# ================================================================
+# NODE / FRONTEND
+# ================================================================
+
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+.next/
+.nuxt/
+dist/
+coverage/
+
+
+# ================================================================
+# OHSE DATA PIPELINE
+#
+# Large/regeneratable artifacts should stay local.
+# ================================================================
+
+# Raw documents
+ohse-document-intelligence/data/raw/*
+!ohse-document-intelligence/data/raw/.gitkeep
+
+# Intermediate processing
+ohse-document-intelligence/data/intermediate/*
+!ohse-document-intelligence/data/intermediate/.gitkeep
+
+# Canonical representations
+ohse-document-intelligence/data/canonical/*
+!ohse-document-intelligence/data/canonical/.gitkeep
+
+# Evidence artifacts
+ohse-document-intelligence/data/evidence/*
+!ohse-document-intelligence/data/evidence/.gitkeep
+
+# Processed outputs
+ohse-document-intelligence/data/processed/*
+!ohse-document-intelligence/data/processed/.gitkeep
+
+# Evaluation datasets / generated outputs
+ohse-document-intelligence/data/evaluation/*
+
+
+# ================================================================
+# DOCUMENT AI OUTPUTS
+#
+# Document AI responses can be very large and regeneratable.
+# ================================================================
+
+**/document_ai*.json
+**/document_ai_raw*.json
+**/document_ai_output*.json
+
+**/validated_structure*.json
+**/parsed_document*.json
+**/layout_response*.json
+
+
+# ================================================================
+# OCR / PAGE IMAGES / GEOMETRY ARTIFACTS
+# ================================================================
+
+**/ocr/
+**/ocr_output/
+**/ocr_results/
+
+**/page_images/
+**/rendered_pages/
+**/page_renders/
+
+**/geometry_output/
+**/geometry_results/
+
+
+# ================================================================
+# GOLD SET
+#
+# Candidates and staging data are regeneratable.
+# Production semantic corpus is intentionally tracked.
+# ================================================================
+
+ohse-document-intelligence/gold/candidates/*
+
+ohse-document-intelligence/gold/rag/*
+
+# Keep the production semantic corpus in Git
+!ohse-document-intelligence/gold/rag/semantic_text_production.jsonl
+
+# Keep directory placeholders
+!ohse-document-intelligence/gold/candidates/.gitkeep
+!ohse-document-intelligence/gold/rag/.gitkeep
+
+
+# ================================================================
+# BENCHMARK / EVALUATION OUTPUTS
+# ================================================================
+
+ohse-document-intelligence/benchmarks/output/
+ohse-document-intelligence/evaluation/output/
+
+**/evaluation_results/
+**/benchmark_results/
+
+*.eval.json
+*.evaluation.json
+
+
+# ================================================================
+# GENERATED REPORTS
+#
+# Keep manually written documentation.
+# Ignore generated machine reports.
+# ================================================================
+
+ohse-document-intelligence/docs/reports/*.log
+ohse-document-intelligence/docs/reports/*.json
+
+# Specific generated reports
+ohse-document-intelligence/docs/reports/table_pipeline_all_pages*.json
+ohse-document-intelligence/docs/reports/_semantic_corpus_sample.json
+ohse-document-intelligence/docs/reports/semantic_retrieval_eval.json
+ohse-document-intelligence/docs/reports/phase_b_sync_report.json
+
+
+# ================================================================
+# CURSOR / AI AGENT ARTIFACTS
+# ================================================================
+
+.cursor/projects/
+agent-transcripts/
+
+.cursor/rules/*.local.*
+.cursor/index/
+
+
+# ================================================================
+# LOCAL DEVELOPMENT
+# ================================================================
+
+*.local
+*.local.*
+.local/
+
+tmp/
+temp/
+.cache/
+.cache/
+
+
+# ================================================================
+# DOCKER
+# ================================================================
+
+docker-compose.override.yml
+docker-compose.local.yml
+
+# Docker local volumes
+.docker/
+
+
+# ================================================================
+# TEST ARTIFACTS
+# ================================================================
+
+test-results/
+test-output/
+coverage.xml
+junit.xml
+
+*.snap
+
+
+# ================================================================
+# OS / SYSTEM
+# ================================================================
+
+.DS_Store
+.AppleDouble
+.LSOverride
+
+Icon
+
+._*
+
+.Spotlight-V100
+.Trashes
+
+ehthumbs.db
+Thumbs.db
+
+
+# ================================================================
+# OPTIONAL: LOCAL DATABASE / VECTOR STORE
+# ================================================================
+
+*.sqlite
+*.sqlite3
+*.db
+*.duckdb
+
+# Local Postgres dumps
+*.dump
+*.backup
+
+
+# ================================================================
+# OPTIONAL: GENERATED MIGRATION / TEMP FILES
+# ================================================================
+
+*.sql.tmp
+*.sql.bak
+
+_analyze144_out.txt
+_debug_az_test.txt
+_debug_limits.txt
+_page144_dump.txt
+
+# ── Cursor / local agent artifacts ────────────────────────────────
+.cursor/
+agent-transcripts/
+# ================================================================
+# KEEP EMPTY DATA DIRECTORIES IN GIT
+# ================================================================
+
+!ohse-document-intelligence/data/raw/.gitkeep
+!ohse-document-intelligence/data/intermediate/.gitkeep
+!ohse-document-intelligence/data/canonical/.gitkeep
+!ohse-document-intelligence/data/evidence/.gitkeep
+!ohse-document-intelligence/data/processed/.gitkeep
+!ohse-document-intelligence/gold/candidates/.gitkeep
+!ohse-document-intelligence/gold/rag/.gitkeep
+```
+
+# ── Document AI / pipeline data ───────────────────────────────────
+
+ohse-document-intelligence/data/
+
+# ── Gold staging / generated candidates ────────────────────────────
+ohse-document-intelligence/gold/
+
+# ── Cursor / local agent artifacts ────────────────────────────────
+ohse-document-intelligence/.cursor/
+
+# ── GCP credentials ───────────────────────────────────────────────
+config/gcp-key.json
+
+ohse-document-intelligence/_analyze*_out.txt
+ohse-document-intelligence/_debug_*.txt
+ohse-document-intelligence/_page*_dump.txt

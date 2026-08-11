@@ -1,0 +1,25 @@
+  r0 c2 (STEL           ) x=85 w=266 | حد مجا ز مواجهه شغلی  نمادها   مبنای تعیین حد
+  r0 c5 (chemical_name  ) x=379 w=232 | ردیف نام علمی ماده شیمیایی   وزن
+  r0 c6 (chemical_name  ) x=95 w=251 | مجاز مواجهه  TWA  STEL/C
+  r1 c0 (health_effect  ) x=80 w=82 | تحریک قسمت فوقانی دستگاه تنفس؛ سردرد؛ هیپوکسی و سی
+  r1 c5 (chemical_name  ) x=188 w=376 | Acetone cyanohydrin [75-86-5] ,as CN  10 / 85   - 
+  r1 c6 (row_number     ) x=516 w=84 | 8  استون سیانو هیدرین
+  r2 c0 (health_effect  ) x=83 w=75 | سیانوز تنفس سقط  ،جنین تحریک قسمت
+  r2 c5 (chemical_name  ) x=79 w=423 | Acetonitrile [75-05-8]  05 / 41   ppm   20   40ppm
+  r2 c6 (row_number     ) x=545 w=56 | 9  استونیتریل
+  r3 c0 (health_effect  ) x=80 w=82 | تنفس سقط  ،جنین تحریک قسمت تحتانی دستگاه تنفس و اخ
+  r3 c5 (chemical_name  ) x=195 w=319 | Acetophenone [98-86-2 ]  15 / 120   ppm   10   -  
+  r3 c6 (row_number     ) x=547 w=56 | 10  استو فنون
+  r4 c0 (health_effect  ) x=87 w=64 | سیستم اعصاب مرکزی
+  r4 c5 (chemical_name  ) x=86 w=462 | 2-Acetylamino flourene [53-96-3 ]  27 / 223   ppm 
+  r4 c6 (row_number     ) x=512 w=90 | 11   2 - استیل آمینو فلورن
+  r5 c5 (chemical_name  ) x=108 w=388 | Acetylene [74-86-2]  04 / 26  خفگی آور ساده ( D ) 
+  r5 c6 (row_number     ) x=556 w=46 | 12  استیلن
+  r6 c0 (health_effect  ) x=84 w=73 | ،ریوی آسیب کبدی خونریزی؛ حساسیت سیستم تنفسی
+  r6 c2 (STEL           ) x=190 w=23 | پوست؛
+  r6 c5 (chemical_name  ) x=82 w=494 | 1,1,2,2-Tetrabromoethane/[79-27-6]  70 / 345   0/1
+  r6 c6 (row_number     ) x=477 w=125 | 13   2،2،1،1 -تترا بر ومو اتان )اسید استیل سالیسیل
+  r7 c0 (health_effect  ) x=84 w=73 | ،ریوی آسیب کبدی خونریزی؛ حساسیت سیستم تنفسی
+  r7 c2 (STEL           ) x=190 w=23 | پوست؛
+  r7 c5 (chemical_name  ) x=100 w=477 | Acetylsalicylic acid [50-78-2]  15 / 180   3 mg/m 
+  r7 c6 (row_number     ) x=477 w=125 | )اسید استیل سالیسیلیک (آسپیرین 14  آکرولئین

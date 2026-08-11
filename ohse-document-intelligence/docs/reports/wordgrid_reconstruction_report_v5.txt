@@ -1,0 +1,82 @@
+=== PAGE 47 WORD → ROW → COLUMN ASSIGNMENTS (sample) ===
+page=47 row_id=1 col_id=6 word='8' bbox=(596,132)
+page=47 row_id=1 col_id=5 word='استون' bbox=(557,126)
+page=47 row_id=1 col_id=5 word='سیانو' bbox=(541,126)
+page=47 row_id=1 col_id=5 word='هیدرین' bbox=(516,126)
+page=47 row_id=1 col_id=5 word='Acetone' bbox=(421,140)
+page=47 row_id=1 col_id=5 word='cyanohydrin' bbox=(453,140)
+page=47 row_id=1 col_id=5 word='[75-86-5]' bbox=(500,140)
+page=47 row_id=1 col_id=5 word=',as' bbox=(537,140)
+page=47 row_id=1 col_id=5 word='CN' bbox=(549,140)
+page=47 row_id=1 col_id=4 word='10' bbox=(392,132)
+page=47 row_id=1 col_id=4 word='/' bbox=(390,132)
+page=47 row_id=1 col_id=4 word='85' bbox=(381,132)
+page=47 row_id=1 col_id=3 word='-' bbox=(328,133)
+page=47 row_id=1 col_id=2 word='3' bbox=(284,129)
+page=47 row_id=1 col_id=2 word='mg/m' bbox=(260,130)
+page=47 row_id=1 col_id=2 word='5' bbox=(253,133)
+page=47 row_id=1 col_id=2 word='C' bbox=(243,130)
+page=47 row_id=1 col_id=1 word='پوست' bbox=(193,132)
+page=47 row_id=1 col_id=0 word='تحریک' bbox=(140,118)
+page=47 row_id=1 col_id=0 word='قسمت' bbox=(121,118)
+page=47 row_id=1 col_id=0 word='فوقانی' bbox=(102,118)
+page=47 row_id=1 col_id=0 word='دستگاه' bbox=(81,118)
+page=47 row_id=1 col_id=0 word='تنفس؛' bbox=(140,133)
+page=47 row_id=1 col_id=0 word='سردرد؛' bbox=(118,133)
+page=47 row_id=1 col_id=0 word='هیپوکسی' bbox=(91,133)
+page=47 row_id=1 col_id=0 word='و' bbox=(86,133)
+page=47 row_id=1 col_id=0 word='سیانوز' bbox=(113,148)
+page=47 row_id=2 col_id=6 word='9' bbox=(596,170)
+page=47 row_id=2 col_id=5 word='استونیتریل' bbox=(545,164)
+page=47 row_id=2 col_id=5 word='Acetonitrile' bbox=(421,178)
+page=47 row_id=2 col_id=5 word='[75-05-8]' bbox=(466,178)
+page=47 row_id=2 col_id=4 word='05' bbox=(392,170)
+page=47 row_id=2 col_id=4 word='/' bbox=(390,170)
+page=47 row_id=2 col_id=4 word='41' bbox=(381,170)
+page=47 row_id=2 col_id=3 word='ppm' bbox=(327,168)
+page=47 row_id=2 col_id=3 word='20' bbox=(316,171)
+page=47 row_id=2 col_id=2 word='40ppm' bbox=(251,168)
+page=47 row_id=2 col_id=1 word='پوست؛' bbox=(198,170)
+page=47 row_id=2 col_id=1 word='A4' bbox=(185,168)
+page=47 row_id=2 col_id=0 word='تحریک' bbox=(140,163)
+
+=== PAGE 47 RECONSTRUCTED TABLE ===
+HEADER: C0:مبنای تعیین حد مجاز مواجهه | C1:پزشکی نمادها | C2:بهداشت ، درمان وآموزش شغلی S | C3:شغلی - وزارت حد مجا ز مواجهه | C4:حدود مجاز مواجهه وزن ملکولی | C5:46 نام علمی ماده شیمیایی | C6:ردیف
+R1: C0:تحریک قسمت فوقانی دستگاه تنفس؛ سردر | C1:پوست | C2:3 mg/m C 5 | C3:- | C4:10 / 85 | C5:استون سیانو هیدرین CN ,as [75-86-5] | C6:8
+R2: C0:تحریک قسمت تحتانی دستگاه تنفس | C1:A4 پوست؛ | C2:40ppm | C3:ppm 20 | C4:05 / 41 | C5:استونیتریل [75-05-8] Acetonitrile | C6:9
+R3: C0:سقط ،جنین تحریک قسمت تحتانی دستگاه  | C1:- | C2:- | C3:ppm 10 | C4:15 / 120 | C5:استو فنون ] [98-86-2 Acetophenone | C6:10
+R4: C0:تحریک و سوزش چشم | C1:- | C2:- | C3:ppm 1 | C4:27 / 223 | C5:2 - استیل آمینو فلورن ] [53-96-3 fl | C6:11
+R5: C0:خفگی | C1:- | C2:D آور ساده ( ) | C3:خفگی | C4:04 / 26 | C5:استیلن [74-86-2] Acetylene | C6:12
+
+=== PAGE 49 RECOVERED DATA ROWS (sample) ===
+  grid_row=1 row#=24 MW=93 / 364 TWA=mg/m3(IFV) 0/05 STEL=- chem=آلدرین [309-00-2] Aldrin
+  grid_row=2 row#=25 MW=08 / 58 TWA=ppm 5/0 STEL=- chem=آلیل الکل [107-18-6] alcohol Allyl
+  grid_row=3 row#=26 MW=09 / 57 TWA=ppm 2 STEL=ppm 6 chem=آلیل آمین [107-11-9] Allylamine
+
+=== PAGE 51 RECOVERED DATA ROWS (sample) ===
+  grid_row=1 row#=40 MW=12 / 94 TWA=ppm 5/0 STEL=- chem=2 - آمینو پریدین [504-29-0] 2-Aminopyridine
+  grid_row=2 row#=41 MW=08 / 84 TWA=3 mg/m 2/0 STEL=- chem=آمیترول [61-82-5] Amitrol
+  grid_row=3 row#=42 MW=03 / 17 TWA=ppm 25 STEL=ppm 35 chem=آمونیاک [7664-41-7] Ammonia
+
+=== PAGE 52 RECOVERED DATA ROWS (sample) ===
+  grid_row=1 row#=49 MW=2/ 102 TWA=ppm 20 STEL=- chem=ترت - آمیل متیل اتر (TAME) Ether methyl tert-
+  grid_row=2 row#=50 MW=4/ 351 TWA=³ mg/m 5/0 STEL=- chem=آنالگین [68-89-3] Analgine
+  grid_row=3 row#=51 MW=13 / 93 TWA=ppm 2 STEL=- chem=آنیلین [62-53-3] Aniline آنیسیدین
+
+=== BEFORE / AFTER DIAGNOSTIC ===
+BEFORE: 7-col pages=10/10 gold_allowed=10
+AFTER v5: 7-col pages=10/10 gold_allowed=8
+
+=== PER-PAGE GOLD GATE ===
+Page 46: recovery=pymupdf_word_grid gold_allowed=False mega_cells=0 numeric_issues=0 merged_valid=False numeric_integrity=True
+Page 47: recovery=pymupdf_word_grid gold_allowed=True mega_cells=0 numeric_issues=0 merged_valid=True numeric_integrity=True
+Page 48: recovery=pymupdf_word_grid gold_allowed=True mega_cells=0 numeric_issues=0 merged_valid=True numeric_integrity=True
+Page 49: recovery=pymupdf_word_grid gold_allowed=True mega_cells=0 numeric_issues=0 merged_valid=True numeric_integrity=True
+Page 50: recovery=None gold_allowed=True mega_cells=0 numeric_issues=0 merged_valid=True numeric_integrity=True
+Page 51: recovery=pymupdf_word_grid gold_allowed=True mega_cells=0 numeric_issues=0 merged_valid=True numeric_integrity=True
+Page 52: recovery=pymupdf_word_grid gold_allowed=True mega_cells=0 numeric_issues=0 merged_valid=True numeric_integrity=True
+Page 53: recovery=pymupdf_word_grid gold_allowed=True mega_cells=0 numeric_issues=0 merged_valid=True numeric_integrity=True
+Page 54: recovery=pymupdf_word_grid gold_allowed=False mega_cells=0 numeric_issues=2 merged_valid=True numeric_integrity=False
+  FAIL: row_number: CRITICAL NUMERIC_VALUE_MISMATCH: row_number value '73' differs from source token '72'
+  FAIL: row_number: CRITICAL: table field row_number value '73' not in source cell cell_table_054_01_8_6
+Page 55: recovery=pymupdf_word_grid gold_allowed=True mega_cells=0 numeric_issues=0 merged_valid=True numeric_integrity=True

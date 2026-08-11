@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>HSE6 Review</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <h1>HSE6 Human Review</h1>
+    <div class="reviewer-bar">
+      <label>Reviewer ID <input id="reviewerId" type="text" value="sahar khalafi" /></label>
+    </div>
+  </header>
+
+  <main id="app">
+    <section id="queueView">
+      <div class="filters">
+        <select id="filterStatus"><option value="">All statuses</option><option value="pending" selected>pending</option><option value="in_progress">in_progress</option><option value="resolved">resolved</option><option value="rejected">rejected</option></select>
+        <select id="filterPriority"><option value="">All priorities</option><option value="critical">critical</option><option value="high">high</option><option value="medium">medium</option><option value="low">low</option></select>
+        <input id="filterPage" type="number" placeholder="Page" min="1" />
+        <button id="refreshBtn">Refresh</button>
+      </div>
+      <table class="queue-table">
+        <thead>
+          <tr>
+            <th>Priority</th><th>Page</th><th>Target</th><th>Issue</th><th>Status</th><th>Assigned</th><th>Created</th><th></th>
+          </tr>
+        </thead>
+        <tbody id="queueBody"></tbody>
+      </table>
+    </section>
+
+    <section id="detailView" class="hidden">
+      <button id="backBtn" class="secondary">← Back to queue</button>
+      <div id="detailHeader"></div>
+      <div class="detail-grid">
+        <div class="panel evidence-panel">
+          <h2>Original PDF / Evidence</h2>
+          <div id="pdfViewer" class="pdf-viewer"><img id="pageImage" alt="PDF page" /></div>
+          <div id="evidenceMeta"></div>
+        </div>
+        <div class="panel candidate-panel">
+          <h2>Extracted Candidate</h2>
+          <div id="candidateMeta"></div>
+          <div id="candidateTable" class="scroll"></div>
+        </div>
+      </div>
+      <div class="panel">
+        <h2>Validation Issues (machine)</h2>
+        <ul id="issuesList"></ul>
+      </div>
+      <div class="panel correct-panel hidden" id="correctPanel">
+        <h2>Corrections</h2>
+        <div id="correctionForms"></div>
+        <label>Reason <textarea id="correctReason" rows="2"></textarea></label>
+        <button id="saveCorrectBtn" class="primary">Save Correction</button>
+      </div>
+      <div class="actions">
+        <button id="approveBtn" class="success">APPROVE</button>
+        <button id="correctBtn" class="warn">CORRECT</button>
+        <button id="rejectBtn" class="danger">REJECT</button>
+      </div>
+      <div class="panel">
+        <h2>Review History</h2>
+        <ul id="historyList"></ul>
+      </div>
+      <div id="resultBanner" class="banner hidden"></div>
+    </section>
+  </main>
+  <script src="app.js"></script>
+</body>
+</html>

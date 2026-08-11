@@ -1,0 +1,9 @@
+Page 47 rows: 8
+Row 8: fa=استون سیانو هیدرین | en=Acetone cyanohydrin | CAS=75-86-5 | MW=85.10 | TWA=None | STEL=None | C=5 mg/m³ | sym=پوست
+Row 9: fa=استونیتریل | en=Acetonitrile | CAS=75-05-8 | MW=41.05 | TWA=20 ppm | STEL=40 ppm | C=None | sym=پوست؛ A4
+Row 10: fa=استو فنون | en=Acetophenone | CAS=98-86-2 | MW=120.15 | TWA=10 ppm | STEL=None | C=None | sym=None
+Row 11: fa=2- استیل آمینو فلورن | en=2-Acetylamino flourene | CAS=53-96-3 | MW=223.27 | TWA=1 ppm | STEL=None | C=None | sym=None
+Row 12: fa=استیلن | en=Acetylene | CAS=74-86-2 | MW=26.04 | TWA=None | STEL=None | C=None | sym=None
+Row 13: fa=2،2،1،1 -تترا بر ومو اتان | en=1,1,2,2-Tetrabromoethane | CAS=79-27-6 | MW=345.70 | TWA=0.1 ppm | STEL=None | C=None | sym=None
+Row 14: fa=اسید استیل سالیسیلیک (آسپیرین) | en=Acetylsalicylic acid | CAS=50-78-2 | MW=180.15 | TWA=0.3 mg/m³ | STEL=None | C=None | sym=A4؛ RSEN؛ OTO
+Row 15: fa=آکرولئین | en=Acrolein | CAS=107-02-8 | MW=56.06 | TWA=None | STEL=None | C=0.05 ppm | sym=OTO؛ پوست؛ A3

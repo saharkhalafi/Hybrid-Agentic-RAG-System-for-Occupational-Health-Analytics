@@ -1,0 +1,29 @@
+{
+  "schema_id": "chemical_oel_v1",
+  "table_type": "chemical_oel",
+  "version": 1,
+  "description": "Occupational chemical exposure limit tables (OHE6)",
+  "fields": [
+    {"name": "row_number", "type": "integer", "semantic_role": "row_index"},
+    {"name": "chemical_name", "type": "chemical", "semantic_role": "chemical_name_en"},
+    {"name": "persian_chemical_name", "type": "chemical", "semantic_role": "chemical_name_fa"},
+    {"name": "CAS", "type": "cas_number", "semantic_role": "cas", "validation": "cas_format"},
+    {"name": "molecular_weight", "type": "numeric", "semantic_role": "molecular_weight"},
+    {"name": "TWA", "type": "exposure_limit", "semantic_role": "twa", "validation": "exposure_unit"},
+    {"name": "STEL", "type": "exposure_limit", "semantic_role": "stel", "validation": "exposure_unit"},
+    {"name": "ceiling", "type": "exposure_limit", "semantic_role": "ceiling", "validation": "exposure_unit"},
+    {"name": "symbols", "type": "notation", "semantic_role": "symbols"},
+    {"name": "health_effect", "type": "text", "semantic_role": "health_effect"}
+  ],
+  "header_aliases": {
+    "chemical_name": ["نام علمی", "نام ماده", "chemical", "material", "ماده شیمیایی"],
+    "CAS": ["cas", "شماره cas"],
+    "molecular_weight": ["وزن مولکولی", "molecular weight", "mw"],
+    "TWA": ["twa"],
+    "STEL": ["stel", "stel/c"],
+    "ceiling": ["ceiling", "c "],
+    "symbols": ["نماد", "symbol", "a1", "a2", "skin", "bei", "dsen"],
+    "health_effect": ["مبنای", "health", "effect", "تعیین حد"],
+    "row_number": ["ردیف", "row", "no", "#"]
+  }
+}
