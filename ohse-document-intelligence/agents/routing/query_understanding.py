@@ -85,8 +85,10 @@ def understand_query(
     query: str,
     *,
     inherited_slots: dict[str, Any] | None = None,
+    raw_query: str | None = None,
 ) -> QueryUnderstanding:
     inherited_slots = inherited_slots or {}
+    raw_query = raw_query or query
     normalized = enhance_normalization(query)
     slots = extract_slots(normalized, inherited_slots)
     trace = ["normalized"]
@@ -94,11 +96,19 @@ def understand_query(
     chemical: ChemicalResolution | None = None
     if session is not None:
         resolver = ChemicalResolver(session)
-        chemical = resolver.resolve(normalized, inherited=inherited_slots)
+        chemical = resolver.resolve(
+            normalized,
+            inherited=inherited_slots,
+            raw_query=raw_query,
+        )
         trace.append(f"chemical:{chemical.method}")
         if chemical.ambiguous:
+            slots.pop("chemical_name", None)
+            slots.pop("cas", None)
+            slots.pop("chemical_id", None)
+            slots["ambiguous_chemical"] = True
             return QueryUnderstanding(
-                raw_query=query,
+                raw_query=raw_query,
                 normalized_query=normalized,
                 query_type=QueryType.AMBIGUOUS,
                 slots=slots,
@@ -120,7 +130,7 @@ def understand_query(
         reason = "missing_chemical"
 
     return QueryUnderstanding(
-        raw_query=query,
+        raw_query=raw_query,
         normalized_query=normalized,
         query_type=qtype,
         slots=slots,

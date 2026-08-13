@@ -66,6 +66,7 @@ class StructuredAgent:
         result = self.store.lookup_oel_field(
             chemical_name=slots.get("chemical_name"),
             cas=slots.get("cas"),
+            chemical_id=slots.get("chemical_id"),
             oel_type=oel_type,
         )
         if not result or result.get("value") is None:
@@ -89,6 +90,8 @@ class StructuredAgent:
         rows = []
         if slots.get("cas"):
             rows = self.store.get_oel_by_cas(slots["cas"])
+        elif slots.get("chemical_id"):
+            rows = self.store.get_oel_by_chemical_id(slots["chemical_id"])
         elif slots.get("chemical_name"):
             rows = self.store.get_oel_by_chemical(slots["chemical_name"])
         if not rows:

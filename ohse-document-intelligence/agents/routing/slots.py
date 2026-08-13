@@ -23,6 +23,15 @@ OEL_KEYWORDS = {
     "سقف": "CEILING",
 }
 
+# Session slots safe to inherit on genuine follow-ups — never chemical identity.
+_INHERITABLE_SLOT_KEYS = frozenset({
+    "oel_type",
+    "formula_id",
+    "variables",
+    "concentration",
+    "unit",
+})
+
 
 def is_valid_cas(cas: str) -> bool:
     """Validate CAS Registry Number checksum (last digit = weighted sum mod 10)."""
@@ -36,7 +45,9 @@ def is_valid_cas(cas: str) -> bool:
 
 def extract_slots(query: str, inherited: dict[str, Any] | None = None) -> dict[str, Any]:
     inherited = inherited or {}
-    slots: dict[str, Any] = dict(inherited)
+    slots: dict[str, Any] = {
+        k: v for k, v in inherited.items() if k in _INHERITABLE_SLOT_KEYS
+    }
     q = query
 
     m = CAS_PATTERN.search(q)

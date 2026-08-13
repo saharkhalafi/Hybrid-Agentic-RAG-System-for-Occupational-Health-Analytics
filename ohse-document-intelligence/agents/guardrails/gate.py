@@ -28,10 +28,13 @@ class GuardrailGate:
         agent_results: dict[str, Any],
     ) -> GuardrailDecision:
         if classification.get("requires_clarification"):
+            msg = self._clarify_message(intent)
+            if classification.get("ambiguous_chemical"):
+                msg = "چند ماده شیمیایی با این نام یافت شد. لطفاً نام دقیق یا شماره CAS را مشخص کنید."
             return GuardrailDecision(
                 allowed=False,
                 action="clarify",
-                message_fa=self._clarify_message(intent),
+                message_fa=msg,
                 reasons=["requires_clarification"],
             )
 

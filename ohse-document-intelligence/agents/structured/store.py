@@ -33,10 +33,23 @@ class PostgresStructuredStore:
         chem = self.session.scalar(stmt)
         if chem:
             return self._chem_dict(chem)
-        # partial match
-        stmt = select(ChemicalRegistry).where(ChemicalRegistry.english_name.ilike(f"%{name}%"))
-        chem = self.session.scalar(stmt)
-        return self._chem_dict(chem) if chem else None
+        # partial match — only when unique
+        matches = list(
+            self.session.scalars(
+                select(ChemicalRegistry).where(
+                    ChemicalRegistry.english_name.ilike(f"%{name}%")
+                ).limit(3)
+            ).all()
+        )
+        if len(matches) == 1:
+            return self._chem_dict(matches[0])
+        return None
+
+    def get_oel_by_chemical_id(self, chemical_id: str) -> list[dict[str, Any]]:
+        chem = self.session.get(ChemicalRegistry, chemical_id)
+        if not chem:
+            return []
+        return self._limits_for_chemical(chem)
 
     def get_oel_by_cas(self, cas: str) -> list[dict[str, Any]]:
         chem = self.session.scalar(select(ChemicalRegistry).where(ChemicalRegistry.cas == cas))
@@ -54,34 +67,39 @@ class PostgresStructuredStore:
         return self._limits_for_chemical(chem_obj)
 
     def _limits_for_chemical(self, chem: ChemicalRegistry) -> list[dict[str, Any]]:
-        limits = self.session.scalars(
-            select(OELChemicalLimit).where(
-                OELChemicalLimit.chemical_id == chem.id,
-                OELChemicalLimit.validation_status == "accepted",
-            )
-        ).all()
-        results = []
-        for lim in limits:
-            prov = lim.source_cell_provenance or {}
-            results.append({
-                "id": str(lim.id),
-                "chemical_id": str(chem.id),
-                "cas": chem.cas,
-                "english_name": lim.english_name or chem.english_name,
-                "persian_name": lim.persian_name or chem.persian_name,
-                "twa": lim.twa,
-                "stel": lim.stel,
-                "ceiling": lim.ceiling,
-                "unit": lim.unit,
-                "source_row_key": lim.source_row_key,
-                "page_number": lim.page_number,
-                "gold_artifact_path": lim.gold_artifact_path,
-                "provenance": prov,
-                "original_values": lim.original_values,
-                "accepted_values": lim.accepted_values,
-                "molecular_weight": chem.molecular_weight,
-            })
-        return results
+        for status in ("accepted", "legacy_reference"):
+            limits = self.session.scalars(
+                select(OELChemicalLimit).where(
+                    OELChemicalLimit.chemical_id == chem.id,
+                    OELChemicalLimit.validation_status == status,
+                ).order_by(OELChemicalLimit.source_row_key.asc().nulls_last())
+            ).all()
+            if not limits:
+                continue
+            results = []
+            for lim in limits:
+                prov = lim.source_cell_provenance or {}
+                results.append({
+                    "id": str(lim.id),
+                    "chemical_id": str(chem.id),
+                    "cas": chem.cas,
+                    "english_name": lim.english_name or chem.english_name,
+                    "persian_name": lim.persian_name or chem.persian_name,
+                    "twa": lim.twa,
+                    "stel": lim.stel,
+                    "ceiling": lim.ceiling,
+                    "unit": lim.unit,
+                    "source_row_key": lim.source_row_key,
+                    "page_number": lim.page_number,
+                    "gold_artifact_path": lim.gold_artifact_path,
+                    "provenance": prov,
+                    "original_values": lim.original_values,
+                    "accepted_values": lim.accepted_values,
+                    "validation_status": status,
+                    "molecular_weight": chem.molecular_weight,
+                })
+            return results
+        return []
 
     @staticmethod
     def _chem_dict(chem: ChemicalRegistry) -> dict[str, Any]:
@@ -167,19 +185,22 @@ class PostgresStructuredStore:
         *,
         chemical_name: str | None = None,
         cas: str | None = None,
+        chemical_id: str | None = None,
         oel_type: str = "TWA",
     ) -> dict[str, Any] | None:
         rows: list[dict[str, Any]] = []
         if cas:
             rows = self.get_oel_by_cas(cas)
+        elif chemical_id:
+            rows = self.get_oel_by_chemical_id(chemical_id)
         elif chemical_name:
             rows = self.get_oel_by_chemical(chemical_name, oel_type=oel_type)
         if not rows:
             return None
-        row = rows[0]
         field = oel_type.upper()
         field_map = {"TWA": "twa", "STEL": "stel", "CEILING": "ceiling", "C": "ceiling"}
         key = field_map.get(field, "twa")
+        row = next((r for r in rows if r.get(key) is not None), rows[0])
         value = row.get(key)
         prov = (row.get("provenance") or {}).get(field) or (row.get("provenance") or {}).get(key)
         cell_id = None

@@ -1,18 +1,12 @@
-
 """Extract word/line geometry from digital PDF pages via PyMuPDF.
 
-This module is intentionally independent from Document AI.
-
-Document AI provides table structure.
-PyMuPDF provides reliable coordinates for digital PDFs.
-
-The geometry resolver consumes this index and returns a normalized
-GeometryMatch object that is used by ingestion/geometry_resolver.py.
+This module is intentionally independent from Document AI matching logic.
+Document AI provides table structure; PyMuPDF provides reliable coordinates
+for digital PDFs. Geometry matching lives in ``document_ai.geometry_resolver``.
 """
 
 from __future__ import annotations
 
-import difflib
 import re
 from dataclasses import dataclass
 from typing import Iterable
@@ -31,7 +25,34 @@ MATH_NOISE = re.compile(
     re.IGNORECASE,
 )
 
+LATEX_CDOT_OVER_GREEK = re.compile(r"\\cdot\s*/\s*\\(?:Delta|pi)\b", re.IGNORECASE)
+LATEX_MG_M3_BRACE = re.compile(r"mg\s*/\s*m\s*\^\{\s*3(?:\([^)]*\))?\s*\}", re.IGNORECASE)
+F_ML_FRAGMENT = re.compile(r"\bf\s*/\s*ml\b", re.IGNORECASE)
+
 CAS_PATTERN = re.compile(r"\[\s*\d{2,7}-\d{2}-\d\s*\]")
+REVERSED_CAS_OCR_PATTERN = re.compile(r"(\d)\]\s*-\s*(\d{2,7})\s*-\s*\[(\d{2,7})")
+
+
+def repair_reversed_cas_brackets(value: str) -> str:
+    """Repair OCR-reversed CAS brackets such as ``9] - 89 - [58`` -> ``[58-89-9]``."""
+
+    def _replace(match: re.Match[str]) -> str:
+        return f"[{match.group(3)}-{match.group(2)}-{match.group(1)}]"
+
+    return REVERSED_CAS_OCR_PATTERN.sub(_replace, value)
+
+
+def normalize_latex_limit_search_text(value: str) -> str:
+    """Normalize LaTeX limit fragments for geometry search only."""
+    if not value:
+        return ""
+    text = value
+    text = LATEX_CDOT_OVER_GREEK.sub(" ", text)
+    text = LATEX_MG_M3_BRACE.sub("mg/m3", text)
+    text = re.sub(r"~+", " ", text)
+    text = F_ML_FRAGMENT.sub("f/ml", text)
+    text = re.sub(r"(\d)\s*mg/m3(?:\([^)]*\))?", r"\1 mg/m3", text, flags=re.IGNORECASE)
+    return text
 
 
 def normalize_match_text(value: str) -> str:
@@ -47,7 +68,10 @@ def normalize_match_text(value: str) -> str:
 
     normalized = normalize_persian_text(value).normalized
 
+    normalized = normalize_latex_limit_search_text(normalized)
     normalized = MATH_NOISE.sub(" ", normalized)
+    normalized = re.sub(r"mg\s*/\s*m\s*3", "mg/m3", normalized, flags=re.IGNORECASE)
+    normalized = re.sub(r"(\d)\s*mg/m3", r"\1 mg/m3", normalized, flags=re.IGNORECASE)
 
     # Normalize common Unicode variants.
     normalized = normalized.replace("ي", "ی")
@@ -84,9 +108,10 @@ def extract_cas_numbers(value: str) -> list[str]:
     if not value:
         return []
 
+    repaired = repair_reversed_cas_brackets(value)
     return [
         re.sub(r"\s+", "", match)
-        for match in CAS_PATTERN.findall(value)
+        for match in CAS_PATTERN.findall(repaired)
     ]
 
 
@@ -125,21 +150,6 @@ class PdfLine:
     words: tuple[PdfWord, ...]
 
 
-@dataclass(frozen=True)
-class GeometryMatch:
-    """Normalized result returned by GeometryResolver.
-
-    IMPORTANT:
-    geometry_resolver.py relies on these exact attributes.
-    """
-
-    bbox: dict[str, float]
-    confidence: float
-    source: str
-    matched_text: str
-    method: str
-
-
 # ---------------------------------------------------------------------------
 # BBox helpers
 # ---------------------------------------------------------------------------
@@ -167,6 +177,53 @@ def rect_to_bbox(rect: fitz.Rect) -> dict[str, float]:
         "width": float(rect.width),
         "height": float(rect.height),
     }
+
+
+def bbox_y_center(bbox: dict[str, float]) -> float:
+    return float(bbox["y"]) + float(bbox["height"]) / 2.0
+
+
+def line_y_center(line: PdfLine) -> float:
+    return (line.bbox[1] + line.bbox[3]) / 2.0
+
+
+NUMERIC_ONLY_PATTERN = re.compile(r"^[\d\s./\\\-،,٫٪%]+$", re.IGNORECASE)
+
+SHORT_LIMIT_TOKENS = frozenset(
+    {
+        "twa",
+        "stel",
+        "c",
+        "ppm",
+        "ceiling",
+        "mg/m3",
+        "mg/m³",
+        "ifv",
+        "iv",
+        "r",
+    }
+)
+
+
+def is_numeric_only_text(value: str) -> bool:
+    text = (value or "").strip()
+    if not text:
+        return False
+    if not NUMERIC_ONLY_PATTERN.match(text):
+        return False
+    return any(char.isdigit() for char in text)
+
+
+def is_short_limit_token(value: str) -> bool:
+    normalized = normalize_match_text(value)
+    if not normalized:
+        return False
+    tokens = [token for token in re.split(r"[\s/]+", normalized) if token]
+    if not tokens:
+        return False
+    if len(tokens) == 1:
+        return tokens[0] in SHORT_LIMIT_TOKENS
+    return all(token in SHORT_LIMIT_TOKENS for token in tokens)
 
 
 def union_rect_bbox(rects: list[fitz.Rect]) -> dict[str, float]:
@@ -326,309 +383,3 @@ class PageGeometryIndex:
             words.sort(key=lambda item: item.x0)
 
         return grouped
-
-
-# ---------------------------------------------------------------------------
-# Geometry Resolver
-# ---------------------------------------------------------------------------
-
-class GeometryResolver:
-    """Resolve extracted text to PDF coordinates.
-
-    Matching cascade:
-
-    1. Exact normalized line match
-    2. Exact normalized word-sequence match
-    3. Ordered token sequence
-    4. CAS number match
-    5. Fuzzy line match
-
-    Confidence values intentionally represent matching confidence,
-    not OCR confidence.
-    """
-
-    EXACT_LINE_CONFIDENCE = 0.98
-    TOKEN_CONFIDENCE = 0.92
-    CAS_CONFIDENCE = 0.95
-    FUZZY_MIN_CONFIDENCE = 0.85
-
-    def __init__(
-        self,
-        page: fitz.Page,
-        *,
-        fuzzy_threshold: float = FUZZY_MIN_CONFIDENCE,
-    ) -> None:
-        self.page = page
-        self.index = PageGeometryIndex(page)
-        self.fuzzy_threshold = fuzzy_threshold
-
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
-
-    def resolve(self, text: str) -> GeometryMatch | None:
-        """Resolve text to a PDF bbox."""
-
-        if not text or not text.strip():
-            return None
-
-        normalized = normalize_match_text(text)
-
-        if not normalized:
-            return None
-
-        # 1. Exact line
-        result = self._match_exact_line(normalized)
-
-        if result:
-            return result
-
-        # 2. Token sequence
-        result = self._match_token_sequence(normalized)
-
-        if result:
-            return result
-
-        # 3. CAS
-        result = self._match_cas(text)
-
-        if result:
-            return result
-
-        # 4. Fuzzy
-        return self._match_fuzzy(normalized)
-
-    # ------------------------------------------------------------------
-    # Exact line
-    # ------------------------------------------------------------------
-
-    def _match_exact_line(
-        self,
-        normalized: str,
-    ) -> GeometryMatch | None:
-
-        for line in self.index.lines:
-
-            if line.norm == normalized:
-
-                return GeometryMatch(
-                    bbox=rect_to_bbox(
-                        fitz.Rect(line.bbox)
-                    ),
-                    confidence=self.EXACT_LINE_CONFIDENCE,
-                    source="pymupdf",
-                    matched_text=line.text,
-                    method="exact_line",
-                )
-
-        return None
-
-    # ------------------------------------------------------------------
-    # Token sequence
-    # ------------------------------------------------------------------
-
-    def _match_token_sequence(
-        self,
-        normalized: str,
-    ) -> GeometryMatch | None:
-
-        target_tokens = tokenize_match_text(normalized)
-
-        if not target_tokens:
-            return None
-
-        best: GeometryMatch | None = None
-
-        for line in self.index.lines:
-
-            line_tokens = tokenize_match_text(line.text)
-
-            if not line_tokens:
-                continue
-
-            if len(target_tokens) > len(line_tokens):
-                continue
-
-            for start in range(
-                0,
-                len(line_tokens) - len(target_tokens) + 1,
-            ):
-                window = line_tokens[
-                    start:start + len(target_tokens)
-                ]
-
-                if window != target_tokens:
-                    continue
-
-                words = list(line.words)
-
-                if not words:
-                    continue
-
-                matched_words = self._select_words_for_tokens(
-                    words,
-                    target_tokens,
-                )
-
-                if not matched_words:
-                    continue
-
-                bbox = union_word_bbox(matched_words)
-
-                candidate = GeometryMatch(
-                    bbox=bbox,
-                    confidence=self.TOKEN_CONFIDENCE,
-                    source="pymupdf",
-                    matched_text=line.text,
-                    method="ordered_token_sequence",
-                )
-
-                best = candidate
-                break
-
-            if best:
-                break
-
-        return best
-
-    # ------------------------------------------------------------------
-    # CAS matching
-    # ------------------------------------------------------------------
-
-    def _match_cas(
-        self,
-        text: str,
-    ) -> GeometryMatch | None:
-
-        target_cas = extract_cas_numbers(text)
-
-        if not target_cas:
-            return None
-
-        for cas in target_cas:
-
-            cas_normalized = normalize_match_text(cas)
-
-            for line in self.index.lines:
-
-                if cas_normalized not in line.norm:
-                    continue
-
-                matched_words = [
-                    word
-                    for word in line.words
-                    if cas_normalized in word.norm
-                    or self._cas_digits_match(
-                        word.norm,
-                        cas_normalized,
-                    )
-                ]
-
-                if matched_words:
-
-                    return GeometryMatch(
-                        bbox=union_word_bbox(matched_words),
-                        confidence=self.CAS_CONFIDENCE,
-                        source="pymupdf",
-                        matched_text=line.text,
-                        method="cas_match",
-                    )
-
-                return GeometryMatch(
-                    bbox=rect_to_bbox(
-                        fitz.Rect(line.bbox)
-                    ),
-                    confidence=self.CAS_CONFIDENCE,
-                    source="pymupdf",
-                    matched_text=line.text,
-                    method="cas_line_match",
-                )
-
-        return None
-
-    # ------------------------------------------------------------------
-    # Fuzzy
-    # ------------------------------------------------------------------
-
-    def _match_fuzzy(
-        self,
-        normalized: str,
-    ) -> GeometryMatch | None:
-
-        best_ratio = 0.0
-        best_line: PdfLine | None = None
-
-        for line in self.index.lines:
-
-            ratio = difflib.SequenceMatcher(
-                None,
-                normalized,
-                line.norm,
-            ).ratio()
-
-            if ratio > best_ratio:
-                best_ratio = ratio
-                best_line = line
-
-        if (
-            best_line is None
-            or best_ratio < self.fuzzy_threshold
-        ):
-            return None
-
-        return GeometryMatch(
-            bbox=rect_to_bbox(
-                fitz.Rect(best_line.bbox)
-            ),
-            confidence=round(best_ratio, 4),
-            source="pymupdf",
-            matched_text=best_line.text,
-            method="fuzzy_line",
-        )
-
-    # ------------------------------------------------------------------
-    # Helpers
-    # ------------------------------------------------------------------
-
-    @staticmethod
-    def _select_words_for_tokens(
-        words: list[PdfWord],
-        target_tokens: list[str],
-    ) -> list[PdfWord] | None:
-
-        if not words:
-            return None
-
-        selected: list[PdfWord] = []
-
-        target_index = 0
-
-        for word in words:
-
-            if target_index >= len(target_tokens):
-                break
-
-            if word.norm == target_tokens[target_index]:
-
-                selected.append(word)
-                target_index += 1
-
-        if target_index != len(target_tokens):
-            return None
-
-        return selected
-
-    @staticmethod
-    def _cas_digits_match(
-        value: str,
-        cas: str,
-    ) -> bool:
-
-        value_digits = re.sub(r"\D", "", value)
-        cas_digits = re.sub(r"\D", "", cas)
-
-        if not value_digits or not cas_digits:
-            return False
-
-        return value_digits == cas_digits
-

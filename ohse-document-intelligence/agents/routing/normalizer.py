@@ -15,6 +15,15 @@ _QUERY_TYPO_REPLACEMENTS = (
     (r"موکولی", "مولکولی"),
 )
 
+# Common limit-type typos / abbreviations in Persian HSE queries.
+_LIMIT_TYPE_TYPO_REPLACEMENTS = (
+    (r"\btwe\b", "TWA"),
+    (r"\btve\b", "TWA"),
+    (r"\btwa\b", "TWA"),
+    (r"\bstel\b", "STEL"),
+    (r"\bceiling\b", "Ceiling"),
+)
+
 
 def normalize_persian_query(query: str) -> str:
     q = (query or "").strip()
@@ -22,5 +31,7 @@ def normalize_persian_query(query: str) -> str:
     q = re.sub(r"\s+", " ", q)
     q = q.replace("؟", "?").replace("‌", " ")
     for pattern, repl in _QUERY_TYPO_REPLACEMENTS:
+        q = re.sub(pattern, repl, q, flags=re.IGNORECASE)
+    for pattern, repl in _LIMIT_TYPE_TYPO_REPLACEMENTS:
         q = re.sub(pattern, repl, q, flags=re.IGNORECASE)
     return q.strip()

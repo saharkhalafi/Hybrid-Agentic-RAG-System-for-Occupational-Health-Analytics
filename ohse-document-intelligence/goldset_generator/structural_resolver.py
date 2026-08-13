@@ -8,8 +8,17 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+import fitz
+
 from config.logging import get_logger
 from config.settings import get_settings
+from document_ai.bbox_provenance import (
+    BBOX_PROVENANCE_DOCUMENT_AI,
+    BBOX_PROVENANCE_PYMUPDF_ALIGNED,
+    BBOX_PROVENANCE_PYMUPDF_RECOVERY,
+    resolve_bbox_inputs,
+)
+from document_ai.geometry_cell_ordering import geometry_resolve_sort_key
 from document_ai.geometry_resolver import GeometryCellInput, GeometryResolver, is_valid_bbox
 from goldset_generator.document_processor import (
     ExtractedCellRecord,
@@ -19,6 +28,7 @@ from goldset_generator.document_processor import (
     _cell_id,
     _table_id,
 )
+from goldset_generator.row_visual_band import refine_table_visual_rows
 from goldset_generator.table_detection_gate import evaluate_table_detection, has_chemical_oel_signatures
 from ingestion.table_recovery import recover_tables_for_page
 from knowledge.table_classifier import classify_table_text
@@ -153,42 +163,80 @@ def _align_evidence_cells(
     pdf_path: Path,
 ) -> list[ExtractedCellRecord]:
     """Layer 2 geometry alignment for Document AI cells missing bbox."""
+    from document_ai.geometry_promotion import PromotionCellInput, resolve_cells_with_row_anchor_retry
+
+    inputs: list[PromotionCellInput] = []
+    by_id: dict[str, ExtractedCellRecord] = {}
+    for cell in evidence_cells:
+        by_id[cell.cell_id] = cell
+        if is_valid_bbox(cell.bbox) and cell.bbox_source == BBOX_PROVENANCE_DOCUMENT_AI:
+            continue
+        da_bbox, bbox_provenance = resolve_bbox_inputs(cell.bbox, cell.bbox_source)
+        inputs.append(
+            PromotionCellInput(
+                page_number=cell.page_number,
+                table_id=cell.table_id,
+                cell_id=cell.cell_id,
+                row_index=cell.row,
+                column_index=cell.column,
+                text=cell.text,
+                document_ai_bbox=da_bbox,
+                bbox_provenance=bbox_provenance,
+                input_bbox_source=cell.bbox_source,
+                cell_source=cell.source,
+            )
+        )
+
+    if not inputs:
+        return evidence_cells
+
+    settings = get_settings()
+    threshold = settings.bbox_confidence_threshold
     aligned: list[ExtractedCellRecord] = []
-    with GeometryResolver(pdf_path, document_path=str(pdf_path)) as resolver:
+    with fitz.open(pdf_path) as doc, GeometryResolver(pdf_path, document_path=str(pdf_path)) as resolver:
+        page_cache = {page_number: doc[page_number - 1] for page_number in {cell.page_number for cell in inputs}}
+
+        def page_lookup(page_number: int) -> fitz.Page:
+            return page_cache[page_number]
+
+        resolved = resolve_cells_with_row_anchor_retry(
+            resolver,
+            inputs,
+            threshold=threshold,
+            page_lookup=page_lookup,
+        )
+
         for cell in evidence_cells:
-            if is_valid_bbox(cell.bbox):
+            if cell.cell_id not in resolved:
                 aligned.append(cell)
                 continue
-            geometry = resolver.resolve(
-                GeometryCellInput(
-                    page_number=cell.page_number,
-                    cell_text=cell.text,
+            geometry = resolved[cell.cell_id]
+            aligned_provenance = BBOX_PROVENANCE_PYMUPDF_ALIGNED
+            if geometry.bbox_source == BBOX_PROVENANCE_DOCUMENT_AI:
+                aligned_provenance = BBOX_PROVENANCE_DOCUMENT_AI
+            aligned.append(
+                ExtractedCellRecord(
+                    cell_id=cell.cell_id,
                     table_id=cell.table_id,
-                    row_index=cell.row,
-                    column_index=cell.column,
-                ),
-                document_ai_bbox=cell.bbox,
+                    page_number=cell.page_number,
+                    row=cell.row,
+                    column=cell.column,
+                    text=cell.text,
+                    bbox=geometry.resolved_bbox,
+                    confidence=cell.confidence,
+                    bbox_confidence=geometry.bbox_confidence,
+                    bbox_source=aligned_provenance if geometry.resolved_bbox else None,
+                    source=cell.source,
+                    normalized_value=cell.normalized_value,
+                    source_reference={
+                        **cell.source_reference,
+                        "bbox": geometry.resolved_bbox,
+                        "bbox_source": aligned_provenance if geometry.resolved_bbox else None,
+                        "alignment_layer": "structural_resolver",
+                        "geometry_resolved_pass": geometry.resolved_pass,
+                    },
+                )
             )
-            updated = ExtractedCellRecord(
-                cell_id=cell.cell_id,
-                table_id=cell.table_id,
-                page_number=cell.page_number,
-                row=cell.row,
-                column=cell.column,
-                text=cell.text,
-                bbox=geometry.bbox,
-                confidence=cell.confidence,
-                bbox_confidence=geometry.match_confidence,
-                bbox_source=geometry.bbox_source or "pymupdf_aligned",
-                source=cell.source,
-                normalized_value=cell.normalized_value,
-                source_reference={
-                    **cell.source_reference,
-                    "bbox": geometry.bbox,
-                    "alignment_layer": "structural_resolver",
-                },
-            )
-            aligned.append(updated)
     return aligned
 
 
@@ -217,7 +265,7 @@ def _recovered_to_records(recovered, table_index: int) -> tuple[ExtractedTableRe
                 bbox=cell.bbox,
                 confidence=cell.confidence,
                 bbox_confidence=cell.confidence if cell.bbox else None,
-                bbox_source="pymupdf" if cell.bbox else None,
+                bbox_source=BBOX_PROVENANCE_PYMUPDF_RECOVERY if cell.bbox else None,
                 source="structural_resolver",
                 normalized_value=normalized.normalized if normalized else None,
                 source_reference={
@@ -290,6 +338,23 @@ def resolve_structure(
         if page_evidence_tables and not needs_recovery:
             for table in page_evidence_tables:
                 table = _apply_aligned_bboxes(table, aligned_by_id)
+                new_rows, split_count = refine_table_visual_rows(table.table_id, table.rows)
+                if split_count:
+                    logger.info(
+                        "visual_row_band_split",
+                        page_number=page_num,
+                        table_id=table.table_id,
+                        split_rows=split_count,
+                    )
+                    table = ExtractedTableRecord(
+                        table_id=table.table_id,
+                        page_number=table.page_number,
+                        table_type=table.table_type,
+                        rows=new_rows,
+                        structural_confidence=table.structural_confidence,
+                        raw_markdown=table.raw_markdown,
+                        bbox=table.bbox,
+                    )
                 merged = 0
                 for cell in table.flat_cells():
                     if _is_merged_cell(cell.text):

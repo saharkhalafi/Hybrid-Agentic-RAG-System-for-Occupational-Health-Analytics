@@ -184,6 +184,7 @@ class QueryOrchestrator:
                 self.session,
                 ctx.resolved_query,
                 inherited_slots=ctx.merged_slots,
+                raw_query=query,
             )
         except OperationalError as exc:
             logger.error("database_unavailable", trace_id=trace.trace_id, error=str(exc))
@@ -203,6 +204,11 @@ class QueryOrchestrator:
             ctx.ambiguous = True
             if "chemical" in (understanding.clarification_reason or ""):
                 ctx.missing_for_resolution.append("chemical_name")
+        elif slots.get("chemical_name") or slots.get("cas"):
+            ctx.ambiguous = False
+            ctx.missing_for_resolution = [
+                m for m in ctx.missing_for_resolution if m not in ("chemical_name", "cas")
+            ]
         trace.slots = slots
 
         classification = self.classifier.classify(
@@ -230,6 +236,7 @@ class QueryOrchestrator:
             classification={
                 "requires_clarification": classification.requires_clarification,
                 "numeric_safety_level": classification.numeric_safety_level,
+                "ambiguous_chemical": slots.get("ambiguous_chemical"),
             },
             agent_results=agent_results,
         )

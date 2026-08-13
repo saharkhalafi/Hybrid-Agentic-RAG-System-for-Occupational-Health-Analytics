@@ -10,6 +10,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from agents.routing.chemical_registry_cache import get_accepted_chemicals
+from agents.routing.entity_signals import extract_persian_entity_tokens, query_has_entity_attempt, query_has_explicit_entity_signal
 from database.models import ChemicalRegistry
 
 # Common leading descriptors in OHE6 English names (reversed in user queries)
@@ -38,6 +39,7 @@ _PERSIAN_MODIFIERS = {
 _PERSIAN_ROOT_HINTS: dict[str, str] = {
     "استامید": "acetamide",
     "استات": "acetate",
+    "استونیتریل": "acetonitrile",
     "بنزن": "benzene",
     "تولوئن": "toluene",
     "متان": "methane",
@@ -49,6 +51,12 @@ _PERSIAN_ROOT_HINTS: dict[str, str] = {
     "اتانول": "ethanol",
     "استایرن": "styrene",
     "سولفید": "sulfide",
+    "سیلیکات": "silicate",
+    "آلومینیوم": "aluminosilicate",
+    "فیبر": "fibre",
+    "فیبرهای": "fibre",
+    "آمینو": "amino",
+    "بوتانول": "butanol",
 }
 
 
@@ -63,6 +71,19 @@ class ChemicalResolution:
     ambiguous: bool = False
     candidates: list[dict[str, Any]] | None = None
 
+    @property
+    def source(self) -> str | None:
+        """Provenance category for traces: explicit_query | cas_query | session_context."""
+        if self.method == "inherited":
+            return "session_context"
+        if self.method == "cas_exact":
+            return "cas_query"
+        if self.method in {"empty", "no_match", "no_tokens", "below_threshold", "ambiguous"}:
+            return None
+        if self.canonical_name or self.cas:
+            return "explicit_query"
+        return None
+
     def to_slot_dict(self) -> dict[str, Any]:
         out: dict[str, Any] = {}
         if self.canonical_name:
@@ -73,6 +94,8 @@ class ChemicalResolution:
             out["chemical_id"] = self.chemical_id
         out["resolution_confidence"] = self.confidence
         out["resolution_method"] = self.method
+        if self.source:
+            out["resolution_source"] = self.source
         if self.ambiguous:
             out["ambiguous_chemical"] = True
         return out
@@ -118,6 +141,54 @@ def _modifier_consistent(query: str, chem: ChemicalRegistry) -> bool:
     return True
 
 
+def _combined_label_text(chem: ChemicalRegistry) -> str:
+    parts = [chem.english_name or "", chem.persian_name or ""]
+    aliases = chem.aliases or {}
+    if isinstance(aliases, dict):
+        for fa in aliases.get("fa") or []:
+            if fa:
+                parts.append(str(fa))
+        for en in aliases.get("en") or []:
+            if en:
+                parts.append(str(en))
+    return _normalize_name(" ".join(parts))
+
+
+def _persian_phrase_hits(query: str, chem: ChemicalRegistry) -> list[tuple[int, str]]:
+    """Longest Persian label substring matches in the query."""
+    hits: list[tuple[int, str]] = []
+    for label in _persian_labels(chem):
+        if len(label) >= 3 and label in query:
+            hits.append((len(label), label))
+    # Also match multi-token Persian phrases from the query against combined labels.
+    tokens = extract_persian_entity_tokens(query)
+    if len(tokens) >= 2:
+        for width in range(len(tokens), 1, -1):
+            for i in range(len(tokens) - width + 1):
+                phrase = " ".join(tokens[i : i + width])
+                blob = _combined_label_text(chem)
+                if phrase in blob or phrase.replace(" ", "") in blob.replace(" ", ""):
+                    hits.append((len(phrase), phrase))
+    return hits
+
+
+def _distinctive_hint_score(query: str, chem: ChemicalRegistry) -> float:
+    """Score how many distinctive Persian/English tokens in the query match this chemical."""
+    fa_tokens = extract_persian_entity_tokens(query)
+    if not fa_tokens:
+        return 0.0
+    en_blob = _combined_label_text(chem)
+    matched = 0
+    for token in fa_tokens:
+        if token in (chem.persian_name or "") or token in en_blob:
+            matched += 1
+            continue
+        hint = _PERSIAN_ROOT_HINTS.get(token)
+        if hint and hint in en_blob:
+            matched += 1
+    return matched / len(fa_tokens)
+
+
 def _persian_english_hint_tokens(query: str) -> set[str]:
     """Map Persian chemical phrases in the query to English name tokens."""
     q_tokens = _tokenize(query)
@@ -136,13 +207,45 @@ def _hint_token_score(hints: set[str], chem: ChemicalRegistry) -> float:
     if not hints:
         return 0.0
     en = _normalize_name(chem.english_name or "")
-    en_tokens = set(en.split())
-    overlap = len(hints & en_tokens)
-    if overlap == 0:
+    matched = sum(1 for hint in hints if hint in en)
+    if matched == 0:
         return 0.0
     if "dimethyl" in hints and "dimethyl" not in en:
         return 0.0
-    return overlap / len(hints)
+    # Multi-root Persian compounds (e.g. آمینو + بوتانول) must match every hint in English name.
+    if len(hints) >= 2 and matched < len(hints):
+        return 0.0
+    return matched / len(hints)
+
+
+def _resolve_compound_root_hints(
+    query: str,
+    chemicals: list[ChemicalRegistry],
+) -> ChemicalResolution | None:
+    """Resolve multi-token Persian queries via English root hints before OCR partial labels."""
+    fa_tokens = extract_persian_entity_tokens(query)
+    if len(fa_tokens) < 2:
+        return None
+    hints = _persian_english_hint_tokens(query)
+    if len(hints) < 2:
+        return None
+    hint_scored: list[tuple[float, ChemicalRegistry]] = []
+    for chem in chemicals:
+        if not _modifier_consistent(query, chem):
+            continue
+        score = _hint_token_score(hints, chem)
+        if score >= 0.5:
+            hint_scored.append((score, chem))
+    if not hint_scored:
+        return None
+    hint_scored.sort(key=lambda x: x[0], reverse=True)
+    top_score, top_chem = hint_scored[0]
+    if len(hint_scored) > 1 and hint_scored[1][0] >= top_score - 0.05:
+        return None
+    return ChemicalResolution(
+        str(top_chem.id), top_chem.english_name, top_chem.cas, top_chem.persian_name,
+        top_score, "persian_compound_hint",
+    )
 
 
 def _reverse_descriptor_phrase(query: str) -> list[str]:
@@ -177,9 +280,22 @@ class ChemicalResolver:
     def _all_chemicals(self) -> list[ChemicalRegistry]:
         return get_accepted_chemicals(self.session)
 
-    def resolve(self, query: str, *, inherited: dict[str, Any] | None = None) -> ChemicalResolution:
+    def resolve(
+        self,
+        query: str,
+        *,
+        inherited: dict[str, Any] | None = None,
+        raw_query: str | None = None,
+    ) -> ChemicalResolution:
         inherited = inherited or {}
-        if inherited.get("chemical_name") and inherited.get("resolution_confidence", 1.0) >= 0.9:
+        entity_query = (raw_query or query or "").strip()
+        has_explicit_entity = query_has_entity_attempt(entity_query)
+
+        if (
+            inherited.get("chemical_name")
+            and inherited.get("resolution_confidence", 1.0) >= 0.9
+            and not has_explicit_entity
+        ):
             return ChemicalResolution(
                 chemical_id=inherited.get("chemical_id"),
                 canonical_name=inherited["chemical_name"],
@@ -223,32 +339,77 @@ class ChemicalResolver:
             if res:
                 return res
 
+        chemicals = self._all_chemicals()
+        compound = _resolve_compound_root_hints(q, chemicals)
+        if compound:
+            return compound
+
         # 3. Persian names — longest consistent match wins (avoid "استامید" ⊂ "دی متیل استامید")
         persian_hits: list[tuple[int, ChemicalRegistry, str]] = []
-        for chem in self._all_chemicals():
+        for chem in chemicals:
             if not _modifier_consistent(q, chem):
                 continue
-            for label in _persian_labels(chem):
-                if len(label) >= 3 and label in q:
-                    persian_hits.append((len(label), chem, label))
+            for length, label in _persian_phrase_hits(q, chem):
+                persian_hits.append((length, chem, label))
         if persian_hits:
             persian_hits.sort(key=lambda x: x[0], reverse=True)
             top_len, top_chem, top_label = persian_hits[0]
-            # Ambiguity when two labels tie on length
-            tied = [h for h in persian_hits if h[0] == top_len]
-            if len(tied) > 1:
+            competing = [h for h in persian_hits if h[0] == top_len and h[1].id != top_chem.id]
+            if competing:
+                # Tie-break short partial Persian labels using multi-token hints.
+                tied_chems = {top_chem.id: top_chem}
+                for _, chem, _ in competing:
+                    tied_chems[chem.id] = chem
+                hint_ranked = sorted(
+                    (( _distinctive_hint_score(q, c), c) for c in tied_chems.values()),
+                    key=lambda x: x[0],
+                    reverse=True,
+                )
+                if hint_ranked[0][0] >= 0.5 and (
+                    len(hint_ranked) == 1 or hint_ranked[0][0] > hint_ranked[1][0] + 0.15
+                ):
+                    winner = hint_ranked[0][1]
+                    return ChemicalResolution(
+                        str(winner.id), winner.english_name, winner.cas, winner.persian_name,
+                        min(0.95, hint_ranked[0][0]), "persian_exact_tiebreak",
+                    )
                 return ChemicalResolution(
                     None, None, None, None, 0.9, "ambiguous",
                     ambiguous=True,
                     candidates=[
                         {"name": c.english_name, "cas": c.cas, "score": ln / max(len(q), 1)}
-                        for ln, c, _ in tied[:3]
+                        for ln, c, _ in persian_hits[:3]
                     ],
                 )
             return ChemicalResolution(
                 str(top_chem.id), top_chem.english_name, top_chem.cas, top_label,
                 min(0.98, 0.85 + top_len / max(len(q), 1) * 0.1), "persian_exact",
             )
+
+        # 3c. Distinctive multi-token Persian → English mapping (multi-word chemicals)
+        fa_tokens = extract_persian_entity_tokens(q)
+        if len(fa_tokens) >= 2:
+            hint_scored_dist: list[tuple[float, ChemicalRegistry]] = []
+            for chem in self._all_chemicals():
+                score = _distinctive_hint_score(q, chem)
+                if score >= 0.5:
+                    hint_scored_dist.append((score, chem))
+            if hint_scored_dist:
+                hint_scored_dist.sort(key=lambda x: x[0], reverse=True)
+                top_score, top_chem = hint_scored_dist[0]
+                if len(hint_scored_dist) > 1 and hint_scored_dist[1][0] >= top_score - 0.15:
+                    return ChemicalResolution(
+                        None, None, None, None, top_score, "ambiguous",
+                        ambiguous=True,
+                        candidates=[
+                            {"name": c.english_name, "cas": c.cas, "score": s}
+                            for s, c in hint_scored_dist[:3]
+                        ],
+                    )
+                return ChemicalResolution(
+                    str(top_chem.id), top_chem.english_name, top_chem.cas, top_chem.persian_name,
+                    top_score, "persian_distinctive",
+                )
 
         # 3b. Persian root → English token hints (e.g. دی متیل استامید → dimethyl acetamide)
         hint_tokens = _persian_english_hint_tokens(q)
@@ -303,8 +464,13 @@ class ChemicalResolver:
         scored.sort(key=lambda x: x[0], reverse=True)
         top_score, top_chem, method = scored[0]
 
-        # Ambiguity: two close matches
-        if len(scored) > 1 and scored[1][0] >= top_score - 0.05:
+        # Ambiguity: close scores only when both are meaningfully high
+        if (
+            len(scored) > 1
+            and scored[1][0] >= top_score - 0.05
+            and top_score >= 0.35
+            and scored[1][0] >= 0.35
+        ):
             return ChemicalResolution(
                 None, None, None, None, top_score, "ambiguous",
                 ambiguous=True,

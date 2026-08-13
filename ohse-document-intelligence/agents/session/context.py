@@ -6,12 +6,14 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
+from agents.routing.entity_signals import query_has_entity_attempt, query_has_explicit_entity_signal
 from agents.session.store import SessionState, SessionStore
 
 FOLLOWUP_FRAGMENTS = re.compile(
     r"^(STEL|TWA|Ceiling|سقف|CAS|MW|منبع|فرمول|ahv|A\(8\)|"
     r"نداره\؟|چنده\؟|چقدره\؟|همون|اون|اش|ش\؟|پس |باز |دوباره |"
-    r"TWA\؟|STEL\؟|CAS\؟|سقف\؟|حد\؟|)",
+    r"TWA\؟|STEL\؟|CAS\؟|سقف\؟|حد\؟|"
+    r"(?:STEL|TWA|Ceiling|CAS|MW)\s*\??$)",
     re.IGNORECASE,
 )
 PRONOUN_MARKERS = ("همون", "اون", "اش", "ش ", "ش؟", "اون ماده", "همین")
@@ -89,6 +91,7 @@ class SessionContextManager:
 
         is_followup = (
             len(q) < 60
+            and not query_has_entity_attempt(ctx.raw_query)
             and (
                 any(p in q for p in PRONOUN_MARKERS)
                 or FOLLOWUP_FRAGMENTS.match(q)
@@ -100,10 +103,12 @@ class SessionContextManager:
             ctx.requires_context = True
             trace.append("followup_detected")
             if state.chemical_name and "chemical_name" not in ctx.explicit_slots:
-                ctx.inherited_slots["chemical_name"] = state.chemical_name
-                trace.append(f"inherited_chemical:{state.chemical_name}")
+                if not query_has_entity_attempt(ctx.raw_query):
+                    ctx.inherited_slots["chemical_name"] = state.chemical_name
+                    trace.append(f"inherited_chemical:{state.chemical_name}")
             if state.cas and "cas" not in ctx.explicit_slots:
-                ctx.inherited_slots["cas"] = state.cas
+                if not query_has_entity_attempt(ctx.raw_query):
+                    ctx.inherited_slots["cas"] = state.cas
             if state.oel_type and "oel_type" not in ctx.explicit_slots:
                 ctx.inherited_slots["oel_type"] = state.oel_type
             if state.formula_id and "formula_id" not in ctx.explicit_slots:
@@ -130,10 +135,7 @@ class SessionContextManager:
 
     @staticmethod
     def _has_explicit_entity(query: str) -> bool:
-        if CAS_PATTERN.search(query):
-            return True
-        # Latin chemical-like token
-        return bool(re.search(r"\b[A-Z][a-z]{2,}(?:\s+[a-z]+)?\b", query))
+        return query_has_explicit_entity_signal(query)
 
     @staticmethod
     def _expand_followup(query: str, state: SessionState, ctx: SessionContext) -> str:
@@ -173,9 +175,12 @@ class SessionContextManager:
         if not state:
             return
         state.turn_id = ctx.turn_id
-        if slots.get("chemical_name"):
+        if slots.get("ambiguous_chemical"):
+            state.chemical_name = None
+            state.cas = None
+        elif slots.get("chemical_name"):
             state.chemical_name = slots["chemical_name"]
-        if slots.get("cas"):
+        if slots.get("cas") and not slots.get("ambiguous_chemical"):
             state.cas = slots["cas"]
         if slots.get("oel_type"):
             state.oel_type = slots["oel_type"]

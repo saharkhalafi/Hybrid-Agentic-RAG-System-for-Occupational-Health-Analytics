@@ -71,11 +71,26 @@ class IntentClassifier:
         )
 
         if session_ambiguous or missing_slots:
-            intent = self._clarify_intent(missing_slots or [])
-            trace.append(f"clarify:{intent}")
-            meta = self.intent_map[intent]
+            if slots.get("chemical_name") or slots.get("cas"):
+                session_ambiguous = False
+                missing_slots = [m for m in (missing_slots or []) if m not in ("chemical_name", "cas")]
+            if session_ambiguous or missing_slots:
+                intent = self._clarify_intent(missing_slots or [])
+                trace.append(f"clarify:{intent}")
+                meta = self.intent_map[intent]
+                return ClassificationResult(
+                    intent=intent,
+                    confidence=0.95,
+                    slots=slots,
+                    requires_clarification=True,
+                    expected_agents=["clarify"],
+                    routing_trace=trace,
+                )
+
+        if slots.get("ambiguous_chemical"):
+            trace.append("clarify:ambiguous_chemical")
             return ClassificationResult(
-                intent=intent,
+                intent="CLARIFY.MISSING_CHEMICAL",
                 confidence=0.95,
                 slots=slots,
                 requires_clarification=True,

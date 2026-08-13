@@ -26,6 +26,7 @@ class CanonicalCell:
     text: str
     normalized_text: str | None = None
     bbox: dict[str, Any] | None = None
+    bbox_source: str | None = None
     row_span: int = 1
     column_span: int = 1
     merged: bool = False
@@ -40,6 +41,7 @@ class CanonicalCell:
             "text": self.text,
             "normalized_text": self.normalized_text,
             "bbox": self.bbox,
+            "bbox_source": self.bbox_source,
             "row_span": self.row_span,
             "column_span": self.column_span,
             "merged": self.merged,
@@ -125,6 +127,7 @@ class CanonicalGridBuilder:
                     text=str(cell.get("text") or ""),
                     normalized_text=cell.get("normalized_value"),
                     bbox=cell.get("bbox"),
+                    bbox_source=cell.get("bbox_source"),
                     row_span=row_span,
                     column_span=col_span,
                     merged=merged,

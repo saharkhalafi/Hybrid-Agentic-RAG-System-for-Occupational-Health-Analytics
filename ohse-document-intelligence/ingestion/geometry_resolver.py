@@ -1,39 +1,28 @@
-
-"""Resolve Document AI cell geometry against digital PDF geometry.
-
-Document AI:
-    Provides table structure and cell text.
-
-PyMuPDF:
-    Provides physical coordinates for digital PDF pages.
-
-This module combines both sources and NEVER crashes when a cell
-cannot be geometrically resolved. Unresolved cells are explicitly
-marked for review.
-"""
+"""Backwards-compatible batch wrapper over ``document_ai.geometry_resolver``."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
-import fitz
-
-from document_ai.schema import (
-    DocumentAIExtractionResult,
-    ExtractionCell,
+from document_ai.bbox_provenance import resolve_bbox_inputs
+from document_ai.geometry_resolver import (
+    BBOX_SOURCE_DOCUMENT_AI,
+    GeometryCellInput,
+    GeometryMatchResult,
+    GeometryResolver,
+    MATCH_CAS,
+    MATCH_EXACT,
+    MATCH_LINE,
+    MATCH_PARTIAL,
+    MATCH_TOKEN,
+    MATCH_TOKENS,
 )
-from ingestion.pdf_geometry import GeometryMatch, GeometryResolver
+from document_ai.schema import DocumentAIExtractionResult, ExtractionCell
 from config.logging import get_logger
-
 
 logger = get_logger(__name__)
 
-
-# ---------------------------------------------------------------------------
-# Result model
-# ---------------------------------------------------------------------------
 
 @dataclass(frozen=True)
 class ResolvedCellGeometry:
@@ -79,12 +68,8 @@ class GeometryResolutionReport:
     results: list[ResolvedCellGeometry]
 
 
-# ---------------------------------------------------------------------------
-# Main resolver
-# ---------------------------------------------------------------------------
-
 class PdfGeometryResolver:
-    """Resolve Document AI extracted cells to PDF coordinates."""
+    """Resolve Document AI extracted cells to PDF coordinates via the canonical resolver."""
 
     def __init__(
         self,
@@ -92,161 +77,50 @@ class PdfGeometryResolver:
         *,
         fuzzy_threshold: float = 0.85,
     ) -> None:
-
         self.pdf_path = Path(pdf_path)
         self.fuzzy_threshold = fuzzy_threshold
+        self._resolver = GeometryResolver(self.pdf_path, document_path=str(self.pdf_path))
 
-        if not self.pdf_path.exists():
-            raise FileNotFoundError(
-                f"PDF not found: {self.pdf_path}"
-            )
+    def close(self) -> None:
+        self._resolver.close()
 
-        self.document = fitz.open(self.pdf_path)
+    def __enter__(self) -> PdfGeometryResolver:
+        return self
 
-        self._page_resolvers: dict[int, GeometryResolver] = {}
+    def __exit__(self, *_args: object) -> None:
+        self.close()
 
-    # ------------------------------------------------------------------
-    # Page resolver
-    # ------------------------------------------------------------------
-
-    def _get_page_resolver(
-        self,
-        page_number: int,
-    ) -> GeometryResolver | None:
-
-        if page_number < 1:
-            return None
-
-        if page_number > len(self.document):
-            logger.warning(
-                "pdf_page_out_of_range",
-                page_number=page_number,
-                total_pages=len(self.document),
-            )
-            return None
-
-        if page_number not in self._page_resolvers:
-
-            page = self.document[page_number - 1]
-
-            self._page_resolvers[page_number] = GeometryResolver(
-                page,
-                fuzzy_threshold=self.fuzzy_threshold,
-            )
-
-        return self._page_resolvers[page_number]
-
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
-
-    def resolve(
-        self,
-        extraction: DocumentAIExtractionResult,
-    ) -> GeometryResolutionReport:
-
+    def resolve(self, extraction: DocumentAIExtractionResult) -> GeometryResolutionReport:
         results: list[ResolvedCellGeometry] = []
 
         for page in extraction.pages:
-
-            resolver = self._get_page_resolver(
-                page.page_number
-            )
-
-            if resolver is None:
-
-                for table in page.tables:
-                    for row in table.rows:
-                        for cell in row.cells:
-
-                            results.append(
-                                self._unresolved_cell(
-                                    cell=cell,
-                                    page_number=page.page_number,
-                                    reason="page_unavailable",
-                                )
-                            )
-
-                continue
-
             for table in page.tables:
-
                 for row in table.rows:
-
                     for cell in row.cells:
-
-                        result = self._resolve_cell(
-                            cell=cell,
-                            resolver=resolver,
-                            page_number=page.page_number,
-                        )
-
-                        results.append(result)
+                        results.append(self._resolve_cell(cell, page.page_number))
 
         return self._build_report(results)
 
-    # ------------------------------------------------------------------
-    # Cell resolution
-    # ------------------------------------------------------------------
-
-    def _resolve_cell(
-        self,
-        *,
-        cell: ExtractionCell,
-        resolver: GeometryResolver,
-        page_number: int,
-    ) -> ResolvedCellGeometry:
-
+    def _resolve_cell(self, cell: ExtractionCell, page_number: int) -> ResolvedCellGeometry:
         text = (cell.text or "").strip()
 
-        # --------------------------------------------------------------
-        # Empty cells
-        # --------------------------------------------------------------
-
         if not text:
-
-            return self._unresolved_cell(
-                cell=cell,
-                page_number=page_number,
-                reason="empty_cell",
-            )
-
-        # --------------------------------------------------------------
-        # Document AI bbox first
-        # --------------------------------------------------------------
-
-        if cell.bbox:
-
-            confidence = (
-                cell.confidence
-                if cell.confidence is not None
-                else 1.0
-            )
-
-            return ResolvedCellGeometry(
-                page_number=page_number,
-                row_index=cell.row_index,
-                column_index=cell.column_index,
-                text=text,
-                bbox=cell.bbox,
-                bbox_source="document_ai",
-                bbox_confidence=confidence,
-                match_method="document_ai",
-                matched_text=text,
-                resolved=True,
-                needs_review=False,
-                reason=None,
-            )
-
-        # --------------------------------------------------------------
-        # PyMuPDF matching
-        # --------------------------------------------------------------
+            return self._unresolved_cell(cell, page_number, reason="empty_cell")
 
         try:
-            match: GeometryMatch | None = resolver.resolve(text)
-
+            da_bbox, bbox_provenance = resolve_bbox_inputs(cell.bbox, BBOX_SOURCE_DOCUMENT_AI if cell.bbox else None)
+            match: GeometryMatchResult = self._resolver.resolve(
+                GeometryCellInput(
+                    page_number=cell.page_number or page_number,
+                    cell_text=text,
+                    table_id=table_id_from_cell(cell),
+                    row_index=cell.row_index,
+                    column_index=cell.column_index,
+                ),
+                document_ai_bbox=da_bbox,
+                bbox_provenance=bbox_provenance,
+            )
         except Exception as exc:
-
             logger.exception(
                 "geometry_resolution_failed",
                 page_number=page_number,
@@ -255,21 +129,9 @@ class PdfGeometryResolver:
                 text=text[:200],
                 error=str(exc),
             )
+            return self._unresolved_cell(cell, page_number, reason="resolver_exception")
 
-            return self._unresolved_cell(
-                cell=cell,
-                page_number=page_number,
-                reason="resolver_exception",
-            )
-
-        # --------------------------------------------------------------
-        # IMPORTANT:
-        # resolver.resolve() is allowed to return None.
-        # Never dereference None.
-        # --------------------------------------------------------------
-
-        if match is None:
-
+        if match.bbox is None:
             logger.warning(
                 "geometry_not_resolved",
                 page_number=page_number,
@@ -277,16 +139,7 @@ class PdfGeometryResolver:
                 column_index=cell.column_index,
                 text=text[:200],
             )
-
-            return self._unresolved_cell(
-                cell=cell,
-                page_number=page_number,
-                reason="no_match",
-            )
-
-        # --------------------------------------------------------------
-        # Successful match
-        # --------------------------------------------------------------
+            return self._unresolved_cell(cell, page_number, reason="no_match")
 
         return ResolvedCellGeometry(
             page_number=page_number,
@@ -294,29 +147,22 @@ class PdfGeometryResolver:
             column_index=cell.column_index,
             text=text,
             bbox=match.bbox,
-            bbox_source=match.source,
-            bbox_confidence=match.confidence,
-            match_method=match.method,
-            matched_text=match.matched_text,
+            bbox_source=match.bbox_source,
+            bbox_confidence=match.match_confidence,
+            match_method=match.match_method,
+            matched_text=match.source_reference.get("matched_text", text),
             resolved=True,
-            needs_review=(
-                match.confidence < self.fuzzy_threshold
-            ),
+            needs_review=match.match_confidence < self.fuzzy_threshold,
             reason=None,
         )
 
-    # ------------------------------------------------------------------
-    # Unresolved cell
-    # ------------------------------------------------------------------
-
     @staticmethod
     def _unresolved_cell(
-        *,
         cell: ExtractionCell,
         page_number: int,
+        *,
         reason: str,
     ) -> ResolvedCellGeometry:
-
         return ResolvedCellGeometry(
             page_number=page_number,
             row_index=cell.row_index,
@@ -332,95 +178,48 @@ class PdfGeometryResolver:
             reason=reason,
         )
 
-    # ------------------------------------------------------------------
-    # Report
-    # ------------------------------------------------------------------
-
     @staticmethod
-    def _build_report(
-        results: list[ResolvedCellGeometry],
-    ) -> GeometryResolutionReport:
-
+    def _build_report(results: list[ResolvedCellGeometry]) -> GeometryResolutionReport:
         total = len(results)
-
-        resolved = sum(
-            1
-            for result in results
-            if result.resolved and result.bbox is not None
-        )
-
+        resolved = sum(1 for result in results if result.resolved and result.bbox is not None)
         unresolved = total - resolved
+        coverage = resolved / total if total else 1.0
 
-        coverage = (
-            resolved / total
-            if total
-            else 1.0
-        )
-
-        exact = sum(
+        exact_matches = sum(
             1
             for result in results
-            if result.match_method == "exact_line"
+            if result.match_method == MATCH_EXACT
+            or (
+                result.bbox_source == BBOX_SOURCE_DOCUMENT_AI
+                and result.match_method in {MATCH_EXACT, MATCH_LINE}
+            )
         )
-
-        token = sum(
+        token_matches = sum(
+            1 for result in results if result.match_method in {MATCH_TOKENS, MATCH_PARTIAL}
+        )
+        cas_matches = sum(1 for result in results if result.match_method == MATCH_CAS)
+        fuzzy_matches = sum(
             1
             for result in results
-            if result.match_method == "ordered_token_sequence"
+            if result.match_method in {MATCH_TOKEN, MATCH_LINE}
+            and (result.bbox_confidence or 0.0) < 0.98
         )
-
-        cas = sum(
-            1
-            for result in results
-            if result.match_method in {
-                "cas_match",
-                "cas_line_match",
-            }
-        )
-
-        fuzzy = sum(
-            1
-            for result in results
-            if result.match_method == "fuzzy_line"
-        )
-
-        review = sum(
-            1
-            for result in results
-            if result.needs_review
-        )
+        review_cells = sum(1 for result in results if result.needs_review)
 
         return GeometryResolutionReport(
             total_cells=total,
             resolved_cells=resolved,
             unresolved_cells=unresolved,
             coverage=coverage,
-            exact_matches=exact,
-            token_matches=token,
-            cas_matches=cas,
-            fuzzy_matches=fuzzy,
-            review_cells=review,
+            exact_matches=exact_matches,
+            token_matches=token_matches,
+            cas_matches=cas_matches,
+            fuzzy_matches=fuzzy_matches,
+            review_cells=review_cells,
             results=results,
         )
 
-    # ------------------------------------------------------------------
-    # Cleanup
-    # ------------------------------------------------------------------
 
-    def close(self) -> None:
-        """Close the underlying PDF."""
-
-        if self.document is not None:
-            self.document.close()
-
-    def __enter__(self) -> "PdfGeometryResolver":
-        return self
-
-    def __exit__(
-        self,
-        exc_type: Any,
-        exc_value: Any,
-        traceback: Any,
-    ) -> None:
-        self.close()
-
+def table_id_from_cell(cell: ExtractionCell) -> str:
+    page = cell.page_number or 0
+    return f"page-{page}-row-{cell.row_index}-col-{cell.column_index}"

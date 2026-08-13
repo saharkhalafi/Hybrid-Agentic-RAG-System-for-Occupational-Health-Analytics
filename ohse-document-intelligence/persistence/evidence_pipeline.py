@@ -13,6 +13,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from config.logging import get_logger
+from config.settings import get_settings
 from database.models import (
     ChemicalRegistry,
     Document,
@@ -20,15 +21,18 @@ from database.models import (
     DocumentPage,
     ExtractedTable,
     OELChemicalLimit,
+    ReviewIssueType,
     TableCell,
     TableType,
     ValidatedTableRow,
 )
+from document_ai.geometry_gating import CellGeometryGate, evaluate_cell_geometry_gate
 from goldset_generator.fact_resolver import resolve_field_display
 from goldset_generator.structural_resolver import StructuralResolverResult
 from goldset_generator.table_gold_generator import TableGoldGenerator
 from schema_registry.registry import get_schema_registry
 from validation_engine.engine import ValidationEngine
+from review.review_queue import enqueue_review
 
 logger = get_logger(__name__)
 
@@ -131,9 +135,16 @@ def persist_universal_tables(
     document: Document,
     structural: StructuralResolverResult,
     page_detection: dict[int, dict[str, Any]],
+    *,
+    bbox_confidence_threshold: float | None = None,
 ) -> dict[str, uuid.UUID]:
     """Persist Layer 1+2 tables/cells with stable evidence_cell_id."""
     stable_to_uuid: dict[str, uuid.UUID] = {}
+    threshold = (
+        bbox_confidence_threshold
+        if bbox_confidence_threshold is not None
+        else get_settings().bbox_confidence_threshold
+    )
 
     for table in structural.tables:
         detection = page_detection.get(table.page_number, {})
@@ -164,6 +175,58 @@ def persist_universal_tables(
 
         for cell in table.flat_cells():
             ref = cell.source_reference or {}
+            gate = evaluate_cell_geometry_gate(
+                resolved_bbox=cell.bbox,
+                bbox_confidence=cell.bbox_confidence,
+                threshold=threshold,
+            )
+
+            if gate.gate is CellGeometryGate.MISSING_BBOX:
+                enqueue_review(
+                    session,
+                    object_type="table_cell_candidate",
+                    object_id=uuid.uuid4(),
+                    document_id=document.id,
+                    issue_type=ReviewIssueType.MISSING_BBOX,
+                    page_number=cell.page_number,
+                    bbox=None,
+                    confidence=cell.confidence,
+                    review_result={
+                        "table_id": str(db_table.id),
+                        "stable_table_id": table.table_id,
+                        "row_index": cell.row,
+                        "column_index": cell.column,
+                        "text": cell.text,
+                        "evidence_cell_id": cell.cell_id,
+                        "match_method": ref.get("match_method"),
+                    },
+                )
+                continue
+
+            if gate.gate is CellGeometryGate.LOW_CONFIDENCE:
+                enqueue_review(
+                    session,
+                    object_type="table_cell_candidate",
+                    object_id=uuid.uuid4(),
+                    document_id=document.id,
+                    issue_type=ReviewIssueType.LOW_BBOX_CONFIDENCE,
+                    page_number=cell.page_number,
+                    bbox=cell.bbox,
+                    confidence=cell.bbox_confidence,
+                    review_result={
+                        "table_id": str(db_table.id),
+                        "stable_table_id": table.table_id,
+                        "row_index": cell.row,
+                        "column_index": cell.column,
+                        "text": cell.text,
+                        "evidence_cell_id": cell.cell_id,
+                        "bbox_source": cell.bbox_source,
+                        "bbox_confidence": cell.bbox_confidence,
+                        "source_reference": ref,
+                    },
+                )
+                continue
+
             session.add(
                 TableCell(
                     table_id=db_table.id,
