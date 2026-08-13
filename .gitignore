@@ -1,4 +1,3 @@
-```gitignore
 # ================================================================
 # OHSE Document Intelligence
 # Git Ignore
@@ -399,7 +398,6 @@ agent-transcripts/
 !ohse-document-intelligence/data/processed/.gitkeep
 !ohse-document-intelligence/gold/candidates/.gitkeep
 !ohse-document-intelligence/gold/rag/.gitkeep
-```
 
 # ── Document AI / pipeline data ───────────────────────────────────
 
@@ -419,3 +417,14 @@ ohse-document-intelligence/_analyze*_out.txt
 ohse-document-intelligence/_debug_*.txt
 ohse-document-intelligence/_page*_dump.txt
 staged-files.txt
+
+ohse-document-intelligence/scripts/sample_queries.json
+ohse-document-intelligence/scripts/trace_*.py
+ohse-document-intelligence/scripts/diagnose_query_failures.py
+ohse-document-intelligence/scripts/capture_query_baseline_comparison.py
+ohse-document-intelligence/scripts/validate_local_api.py
+
+# Phase 7 chunk rebuild — local WIP (not part of F0.2)
+ohse-document-intelligence/persistence/canonical_chunk_store.py
+ohse-document-intelligence/persistence/phase7_chunk_rebuild.py
+ohse-document-intelligence/scripts/run_phase7_chunk_rebuild.py
