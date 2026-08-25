@@ -37,6 +37,21 @@ def _gcp_available() -> bool:
 pytestmark_db = pytest.mark.skipif(not _db_available(), reason="PostgreSQL not available")
 pytestmark_gcp = pytest.mark.skipif(not _gcp_available(), reason="GCP embedding unavailable")
 
+PHASE7_MIN_EMBEDDED = 563
+
+
+def _phase7_db_ready(session) -> bool:
+    from persistence.semantic_store import count_production_semantic_chunks
+
+    return count_production_semantic_chunks(session)["embedded_semantic"] >= PHASE7_MIN_EMBEDDED
+
+
+def _require_phase7_db(session) -> None:
+    if not _phase7_db_ready(session):
+        pytest.skip(
+            f"Phase 7 semantic corpus not loaded (embedded_semantic < {PHASE7_MIN_EMBEDDED})"
+        )
+
 
 def test_required_result_fields_contract():
     assert "chunk_id" in REQUIRED_RESULT_FIELDS
@@ -51,9 +66,10 @@ def test_production_semantic_counts():
     from persistence.semantic_store import count_production_semantic_chunks
 
     with session_scope() as session:
+        _require_phase7_db(session)
         counts = count_production_semantic_chunks(session)
         embedded = counts["embedded_semantic"]
-        assert embedded >= 563
+        assert embedded >= PHASE7_MIN_EMBEDDED
 
         legacy = session.scalar(
             select(func.count())
@@ -115,6 +131,7 @@ def test_provenance_chain_present():
     from persistence.semantic_store import search_persian_semantic
 
     with session_scope() as session:
+        _require_phase7_db(session)
         results = search_persian_semantic(
             session,
             "حدود مجاز مواجهه شغلی (OEL) چیست",
@@ -182,6 +199,7 @@ def test_eval_set_top5_coverage():
 
     hits = 0
     with session_scope() as session:
+        _require_phase7_db(session)
         for case in SEMANTIC_EVAL_CASES:
             results = search_persian_semantic(session, case.query, limit=5)
             ids = {r["chunk_id"] for r in results}

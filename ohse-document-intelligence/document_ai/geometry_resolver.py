@@ -29,7 +29,15 @@ from document_ai.geometry_search import search_query_variants
 
 from document_ai.geometry_cell_ordering import OEL_ROW_NUMBER_COLUMN
 
-CAS_PATTERN = re.compile(r"\[\d+-\d+-\d+\]")
+# NOTE: tolerates internal spacing around the hyphens too (e.g.
+# "[ 100 - 42 - 5 ]"), consistent with the CAS_PATTERN used in
+# goldset_generator.structural_resolver and
+# ingestion.merged_row_splitter. OCR/PDF extraction can introduce
+# whitespace anywhere inside the bracketed number, not just next to
+# the brackets.
+CAS_PATTERN = re.compile(
+    r"\[\s*\d{2,7}\s*-\s*\d{2}\s*-\s*\d\s*\]"
+)
 ENGLISH_NAME_PATTERN = re.compile(r"[A-Za-z][A-Za-z0-9\- ]{3,}")
 PERSIAN_SUFFIX_TOKENS = {"ها", "های", "تر", "ترین"}
 
@@ -42,8 +50,24 @@ MAX_ROW_BBOX_HEIGHT = 25.0
 AMBIGUITY_SCORE_MARGIN = 0.08
 HEADER_ROW_INDEX = 0
 SEARCH_FOR_MAX_CONFIDENCE = 0.97
-PAGE_TOP_EXCLUDE_RATIO = 0.12
+PAGE_TOP_EXCLUDE_RATIO = 0.04
 HEADER_BAND_PADDING = 12.0
+
+# ----------------------------------------------------------------------
+# CAS-vs-token priority tuning.
+#
+# A cell like "Styrene [ 100-42-5 ]" must resolve against the CAS
+# number's own geometry, not against a generic token-sequence match on
+# the digit fragments "100", "42", "5". Token-sequence candidates can
+# reach base_confidence 0.98 (see _candidates_token_sequence), which
+# used to beat CAS candidates outright (0.94-0.95). CAS_PRIORITY_BONUS
+# / TOKEN_CAS_PENALTY are applied in _score_candidate() whenever the
+# cell text itself contains a CAS number, so CAS-generator candidates
+# reliably win that comparison.
+# ----------------------------------------------------------------------
+
+CAS_PRIORITY_BONUS = 0.06
+TOKEN_CAS_PENALTY = 0.06
 
 HEADER_STRUCTURE_TOKENS = frozenset(
     {
@@ -52,7 +76,6 @@ HEADER_STRUCTURE_TOKENS = frozenset(
         "ceiling",
         "ppm",
         "ردیف",
-        "مواجهه",
         "مواجهه",
         "وزن",
         "ملکولی",
@@ -90,6 +113,19 @@ def compact_match_text(value: str) -> str:
 def significant_tokens(value: str) -> list[str]:
     tokens = tokenize_match_text(value)
     return [token for token in tokens if token not in PERSIAN_SUFFIX_TOKENS and len(token) > 1]
+
+
+def _text_has_cas(text: str) -> bool:
+    """
+    Single check for "does this cell text contain a CAS number", used to
+    decide whether to apply CAS-vs-token priority scoring. Uses the same
+    extraction path as candidate generation (extract_cas_numbers with a
+    CAS_PATTERN fallback) so the two never disagree.
+    """
+
+    return bool(
+        extract_cas_numbers(text) or CAS_PATTERN.findall(text)
+    )
 
 
 @dataclass(frozen=True)
@@ -144,31 +180,105 @@ def is_valid_bbox(bbox: dict[str, Any] | None) -> bool:
     )
 
 
-def document_ai_bbox_to_xywh(bbox: dict[str, Any]) -> dict[str, float] | None:
+def document_ai_bbox_to_xywh(
+    bbox: dict[str, Any],
+) -> dict[str, float] | None:
+    """Convert supported Document AI bbox representations to xywh."""
+
+    if not bbox:
+        return None
+
+    # Already in our canonical xywh format
+    if all(
+        bbox.get(key) is not None
+        for key in ("x", "y", "width", "height")
+    ):
+        width = float(bbox["width"])
+        height = float(bbox["height"])
+
+        if width > 0 and height > 0:
+            return {
+                "x": float(bbox["x"]),
+                "y": float(bbox["y"]),
+                "width": width,
+                "height": height,
+            }
+
+    # Document AI / API bounding box object
     bounding_box = bbox.get("bounding_box") or bbox.get("boundingBox")
+
     if bounding_box:
-        return {
-            "x": float(bounding_box.get("x") or bounding_box.get("left") or 0),
-            "y": float(bounding_box.get("y") or bounding_box.get("top") or 0),
-            "width": float(bounding_box.get("width") or 0),
-            "height": float(bounding_box.get("height") or 0),
-        }
+        x = bounding_box.get("x", bounding_box.get("left"))
+        y = bounding_box.get("y", bounding_box.get("top"))
+        width = bounding_box.get("width")
+        height = bounding_box.get("height")
+
+        if (
+            x is not None
+            and y is not None
+            and width is not None
+            and height is not None
+        ):
+            width = float(width)
+            height = float(height)
+
+            if width > 0 and height > 0:
+                return {
+                    "x": float(x),
+                    "y": float(y),
+                    "width": width,
+                    "height": height,
+                }
+
+    # Polygon / vertices
+    vertices = (
+        bbox.get("normalized_vertices")
+        or bbox.get("normalizedVertices")
+        or bbox.get("vertices")
+    )
+
+    if vertices:
+        xs = []
+        ys = []
+
+        for vertex in vertices:
+            if vertex.get("x") is not None:
+                xs.append(float(vertex["x"]))
+            if vertex.get("y") is not None:
+                ys.append(float(vertex["y"]))
+
+        if xs and ys:
+            x0 = min(xs)
+            y0 = min(ys)
+            x1 = max(xs)
+            y1 = max(ys)
+
+            if x1 > x0 and y1 > y0:
+                return {
+                    "x": x0,
+                    "y": y0,
+                    "width": x1 - x0,
+                    "height": y1 - y0,
+                }
+
     return None
 
 
 def document_ai_y_hint(bbox: dict[str, Any] | None) -> float | None:
     if not bbox:
         return None
+
     converted = document_ai_bbox_to_xywh(bbox)
-    if converted and converted.get("y") is not None and converted.get("height"):
-        height = float(converted["height"])
-        if height > 0:
-            return float(converted["y"]) + height / 2.0
-    if bbox.get("y") is not None and bbox.get("height"):
-        height = float(bbox["height"])
-        if height > 0:
-            return float(bbox["y"]) + height / 2.0
-    return None
+
+    if not converted:
+        return None
+
+    height = float(converted.get("height", 0))
+
+    if height <= 0:
+        return None
+
+    return float(converted["y"]) + height / 2.0
 
 
 class GeometryResolver:
@@ -230,7 +340,7 @@ class GeometryResolver:
             and is_valid_bbox(document_ai_bbox)
         )
         if trusted_document_ai:
-            converted = document_ai_bbox_to_xywh(document_ai_bbox) or document_ai_bbox
+            converted = document_ai_bbox_to_xywh(document_ai_bbox)
             if is_valid_bbox(converted):
                 result = GeometryMatchResult(
                     bbox=converted,
@@ -374,9 +484,12 @@ class GeometryResolver:
 
     @staticmethod
     def _line_looks_like_table_header(line: PdfLine) -> bool:
-        if any(token in line.norm for token in HEADER_STRUCTURE_TOKENS):
+        line_tokens = set(tokenize_match_text(line.norm))
+        if line_tokens & HEADER_STRUCTURE_TOKENS:
             return True
-        return "mg/m" in line.norm or "مواجه" in line.norm or "symbol" in line.norm
+        return ("mg/m" in line.norm
+    or "مواجه" in line.norm
+    or "symbol" in line.norm)
 
     def _infer_structural_header_band(self, page_index: PageGeometryIndex) -> tuple[float, float] | None:
         header_lines = [
@@ -461,11 +574,10 @@ class GeometryResolver:
         page_height: float,
         header_band: tuple[float, float] | None,
     ) -> bool:
-        if self._is_below_page_top_fragment(y_center, page_height):
-            return False
-        if header_band is not None and self._is_in_band(y_center, header_band):
-            return False
-        return True
+        if header_band is not None:
+            if self._is_in_band(y_center, header_band):
+                return False
+        return y_center <= page_height * 0.02
 
     def _row_y_target(self, cell: GeometryCellInput, da_y_hint: float | None) -> float | None:
         if cell.row_index is None:
@@ -565,6 +677,26 @@ class GeometryResolver:
         candidates.extend(
             self._candidates_exact_lines(page_index, normalized, row_y_target, require_row)
         )
+
+        # ------------------------------------------------------------
+        # CAS matching runs BEFORE token/substring matching.
+        #
+        # A cell like "Styrene [ 100-42-5 ]" must resolve against the
+        # CAS number's own geometry, not against a generic token-
+        # sequence match on the digit fragments "100", "42", "5" --
+        # that token match could previously score higher (up to 0.98)
+        # than a CAS match (0.94-0.95) and win outright. Generating
+        # CAS candidates first, and boosting them in _score_candidate()
+        # below whenever the cell text contains a CAS number, fixes
+        # that.
+        # ------------------------------------------------------------
+
+        cas_numbers = extract_cas_numbers(text) or CAS_PATTERN.findall(text)
+        if cas_numbers:
+            candidates.extend(
+                self._candidates_cas(page_index, page, cas_numbers, row_y_target, require_row)
+            )
+
         if not require_row or row_y_target is not None:
             candidates.extend(
                 self._candidates_search_for(page, text, normalized, compact, row_y_target, require_row)
@@ -579,12 +711,6 @@ class GeometryResolver:
         candidates.extend(
             self._candidates_token_sequence(page_index, significant_tokens(text), row_y_target, require_row)
         )
-
-        cas_numbers = extract_cas_numbers(text) or CAS_PATTERN.findall(text)
-        if cas_numbers:
-            candidates.extend(
-                self._candidates_cas(page_index, page, cas_numbers, row_y_target, require_row)
-            )
 
         if len(compact) >= 4:
             candidates.extend(
@@ -922,7 +1048,7 @@ class GeometryResolver:
             if require_row and row_y_target is None:
                 continue
 
-            ordered = sorted(line_words, key=lambda word: -word.x0)
+            ordered = sorted(line_words,key=lambda word: word.x0,)
             norms = [word.norm for word in ordered]
             token_count = len(tokens)
 
@@ -958,7 +1084,7 @@ class GeometryResolver:
                             matched_words=[word.text for word in matched_words],
                             y_center=bbox_y_center(bbox),
                             generator="token_sequence",
-                        )
+                    )
                     )
                 elif matched_words and token_index >= max(1, int(token_count * 0.6)):
                     bbox = union_word_bbox(matched_words)
@@ -1008,7 +1134,13 @@ class GeometryResolver:
                         _GeometryCandidate(
                             bbox=bbox,
                             match_method=MATCH_CAS,
-                            base_confidence=0.95,
+                            # Bumped from 0.95: this is a direct
+                            # word-level CAS match, the strongest CAS
+                            # signal available. Combined with the
+                            # CAS_PRIORITY_BONUS applied in
+                            # _score_candidate(), this reliably beats
+                            # token_sequence's 0.98 ceiling.
+                            base_confidence=0.97,
                             matched_words=[word.text for word in matched_words],
                             y_center=bbox_y_center(bbox),
                             generator="cas_line_words",
@@ -1020,7 +1152,7 @@ class GeometryResolver:
                     _GeometryCandidate(
                         bbox=self._line_bbox(line),
                         match_method=MATCH_CAS,
-                        base_confidence=0.94,
+                        base_confidence=0.95,
                         matched_words=[line.text],
                         y_center=line_y_center(line),
                         generator="cas_line",
@@ -1035,7 +1167,7 @@ class GeometryResolver:
                     _GeometryCandidate(
                         bbox=bbox,
                         match_method=MATCH_CAS,
-                        base_confidence=0.94,
+                        base_confidence=0.95,
                         matched_words=[cas],
                         y_center=bbox_y_center(bbox),
                         generator="cas_search_for",
@@ -1148,8 +1280,28 @@ class GeometryResolver:
         *,
         row_y_target: float | None,
         header_band: tuple[float, float] | None,
+        text_has_cas: bool = False,
     ) -> float:
         score = candidate.base_confidence
+
+        # ------------------------------------------------------------
+        # CAS matching takes priority over generic token matching.
+        #
+        # When the cell text itself contains a CAS number, a candidate
+        # produced by CAS-specific matching (CAS_GENERATORS) is the
+        # more specific, more trustworthy signal and gets a bonus;
+        # a plain token/partial-token-sequence candidate for the same
+        # cell — which may just be matching the CAS's own digit
+        # fragments as generic tokens — gets a matching penalty. This
+        # is what fixes cases like "Styrene [ 100-42-5 ]" resolving to
+        # a token match instead of the actual CAS geometry.
+        # ------------------------------------------------------------
+
+        if text_has_cas:
+            if candidate.generator in CAS_GENERATORS:
+                score += CAS_PRIORITY_BONUS
+            elif candidate.generator in {"token_sequence", "partial_token_sequence"}:
+                score -= TOKEN_CAS_PENALTY
 
         skip_row_penalty = (
             candidate.generator in CAS_GENERATORS | ENGLISH_NAME_GENERATORS
@@ -1201,6 +1353,7 @@ class GeometryResolver:
         normalized = normalize_match_text(text)
         require_row = self._requires_row_context(cell, text, normalized)
         numeric_like = self._is_numeric_like(text, normalized)
+        text_has_cas = _text_has_cas(text)
 
         if require_row and row_y_target is None:
             return None, 0.0, []
@@ -1216,7 +1369,16 @@ class GeometryResolver:
                 return None, 0.0, []
 
         scored = [
-            (candidate, self._score_candidate(candidate, cell, row_y_target=row_y_target, header_band=header_band))
+            (
+                candidate,
+                self._score_candidate(
+                    candidate,
+                    cell,
+                    row_y_target=row_y_target,
+                    header_band=header_band,
+                    text_has_cas=text_has_cas,
+                ),
+            )
             for candidate in candidates
         ]
         scored.sort(key=lambda item: (-item[1], -item[0].base_confidence))

@@ -1,0 +1,18 @@
+﻿python.exe : Traceback (most recent call last):
+At E:\temp\ps-script-be9d2078-a59f-4d64-acde-26984cb023d4.ps1:107 char:67
++ ... elligence"; & "E:\cursor projects\HSE6 AI Agent\.venv\Scripts\python. ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (Traceback (most recent call last)::String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+  File "<string>", line 30, in <module>
+    print(i, l[:120])
+    ~~~~~^^^^^^^^^^^^
+  File "E:\Python\Python313\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode characters in position 0-2: character maps to <undefined>
+PAGE 46 lines 54
+0 45
+9 Acephate [30560-19-1]; [115096-11-2]
+15 

@@ -95,11 +95,16 @@ def understand_query(
 
     chemical: ChemicalResolution | None = None
     if session is not None:
+        authoritative = bool(
+            slots.get("oel_type")
+            or re.search(r"\b(TWA|STEL|CEILING|CAS|MW|ppm|mg/m)\b", normalized, re.I)
+        )
         resolver = ChemicalResolver(session)
         chemical = resolver.resolve(
             normalized,
             inherited=inherited_slots,
             raw_query=raw_query,
+            authoritative=authoritative,
         )
         trace.append(f"chemical:{chemical.method}")
         if chemical.ambiguous:

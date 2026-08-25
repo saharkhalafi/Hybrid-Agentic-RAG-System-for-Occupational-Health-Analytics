@@ -488,6 +488,24 @@ class KnowledgeSyncRun(Base):
     status: Mapped[str] = mapped_column(String(32), default="running", nullable=False)
 
 
+class NoDataEvent(Base):
+    """Demand signal when authoritative data is unavailable (HITL prioritization)."""
+
+    __tablename__ = "no_data_events"
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    reason: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    chemical_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("chemical_registry.id", ondelete="SET NULL"),
+        index=True,
+    )
+    cas: Mapped[str | None] = mapped_column(String(32), index=True)
+    query_text: Mapped[str | None] = mapped_column(Text)
+    trace_id: Mapped[str | None] = mapped_column(String(64), index=True)
+    intent: Mapped[str | None] = mapped_column(String(128))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+
 # ---------------------------------------------------------------------------
 # Validation reports
 # ---------------------------------------------------------------------------

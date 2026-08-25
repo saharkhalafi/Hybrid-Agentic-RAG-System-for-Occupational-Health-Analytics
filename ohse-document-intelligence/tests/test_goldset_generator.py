@@ -301,11 +301,18 @@ def test_page_metadata():
     assert meta["document_type"] in {"introduction", "unknown"}
 
 
-def _cell(text: str, row: int, col: int) -> ExtractedCellRecord:
+def _cell(
+    text: str,
+    row: int,
+    col: int,
+    *,
+    table_id: str = "table_t_01",
+    page_number: int = 48,
+) -> ExtractedCellRecord:
     return ExtractedCellRecord(
-        cell_id=f"cell_t_{row}_{col}",
-        table_id="table_t_01",
-        page_number=48,
+        cell_id=f"cell_{table_id}_{row}_{col}",
+        table_id=table_id,
+        page_number=page_number,
         row=row,
         column=col,
         text=text,
@@ -333,15 +340,39 @@ def test_document_ai_quality_poor_detects_header_cas_pollution():
         structural_confidence=0.5,
         raw_markdown="",
     )
-    assert _document_ai_table_quality_poor(page_text, [table]) is True
+    assert _document_ai_table_quality_poor(page_text, table) is True
 
 
 def test_document_ai_quality_good_when_cas_in_data_rows():
     page_text = "Acetaldehyde [75-07-0] Acetone [67-64-1]"
-    header = [_cell("TWA", 0, 0), _cell("نام علمی", 0, 1)]
+    header = [
+        _cell("مبنای تعیین حد مجاز مواجهه", 0, 0, table_id="table_046_01"),
+        _cell("نمادها", 0, 1, table_id="table_046_01"),
+        _cell("STEL/C", 0, 2, table_id="table_046_01"),
+        _cell("TWA", 0, 3, table_id="table_046_01"),
+        _cell("وزن ملکولی", 0, 4, table_id="table_046_01"),
+        _cell("نام علمی ماده شیمیایی", 0, 5, table_id="table_046_01"),
+        _cell("ردیف", 0, 6, table_id="table_046_01"),
+    ]
     data = [
-        [_cell("25 ppm", 1, 0), _cell("Acetaldehyde [75-07-0]", 1, 1)],
-        [_cell("500 ppm", 2, 0), _cell("Acetone [67-64-1]", 2, 1)],
+        [
+            _cell("", 1, 0, table_id="table_046_01"),
+            _cell("A4", 1, 1, table_id="table_046_01"),
+            _cell("", 1, 2, table_id="table_046_01"),
+            _cell("25 ppm", 1, 3, table_id="table_046_01"),
+            _cell("44/05", 1, 4, table_id="table_046_01"),
+            _cell("Acetaldehyde [75-07-0]", 1, 5, table_id="table_046_01"),
+            _cell("2", 1, 6, table_id="table_046_01"),
+        ],
+        [
+            _cell("", 2, 0, table_id="table_046_01"),
+            _cell("A4", 2, 1, table_id="table_046_01"),
+            _cell("", 2, 2, table_id="table_046_01"),
+            _cell("500 ppm", 2, 3, table_id="table_046_01"),
+            _cell("58/08", 2, 4, table_id="table_046_01"),
+            _cell("Acetone [67-64-1]", 2, 5, table_id="table_046_01"),
+            _cell("3", 2, 6, table_id="table_046_01"),
+        ],
     ]
     table = ExtractedTableRecord(
         table_id="table_046_01",
@@ -351,7 +382,7 @@ def test_document_ai_quality_good_when_cas_in_data_rows():
         structural_confidence=0.9,
         raw_markdown="",
     )
-    assert _document_ai_table_quality_poor(page_text, [table]) is False
+    assert _document_ai_table_quality_poor(page_text, table) is False
 
 
 def test_validation_engine_merged_cell_requires_review():
@@ -553,3 +584,213 @@ def test_schema_registry_loads_chemical_oel():
     assert row["symbols"]["value"] == "DSEN ؛BEI"
     assert row["persian_chemical_name"]["value"] == "آکریل آمید"
     assert row["row_number"]["value"] == "15"
+
+
+def _oel_six_column_table(rows: list[list[ExtractedCellRecord]]) -> ExtractedTableRecord:
+    return ExtractedTableRecord(
+        table_id="table_046_01",
+        page_number=46,
+        table_type="chemical_oel",
+        rows=rows,
+        structural_confidence=0.9,
+        raw_markdown="",
+    )
+
+
+def test_expand_oel_merged_limit_header_to_seven_columns():
+    from goldset_generator.structural_resolver import _expand_oel_limit_columns
+
+    table = _oel_six_column_table(
+        [
+            [
+                _cell("مبنای تعیین حد مجاز مواجهه", 0, 0),
+                _cell("نمادها", 0, 1),
+                _cell("حد مجاز مواجهه شغلی TWA STEL/C", 0, 2),
+                _cell("وزن ملکولی", 0, 3),
+                _cell("نام علمی ماده شیمیایی", 0, 4),
+                _cell("ردیف", 0, 5),
+            ],
+            [
+                _cell("effect", 1, 0),
+                _cell("A2", 1, 1),
+                _cell("۱۵ ppm ۱۰ ppm", 1, 2),
+                _cell("۶۰/۰۵", 1, 3),
+                _cell("Acetic acid [64-19-7]", 1, 4),
+                _cell("۵", 1, 5),
+            ],
+        ]
+    )
+
+    expanded, count = _expand_oel_limit_columns(table)
+
+    assert count == 1
+    assert max(len(row) for row in expanded.rows) == 7
+    assert expanded.rows[0][2].text == "حد مجاز مواجهه شغلی STEL/C"
+    assert expanded.rows[0][3].text == "TWA"
+    assert expanded.rows[1][2].text == "۱۵ ppm"
+    assert expanded.rows[1][3].text == "۱۰ ppm"
+    assert expanded.rows[1][4].text == "۶۰/۰۵"
+    assert expanded.rows[1][5].text == "Acetic acid [64-19-7]"
+
+
+def test_expand_oel_limit_columns_leaves_seven_column_table_unchanged():
+    from goldset_generator.structural_resolver import _expand_oel_limit_columns
+
+    table = _oel_six_column_table(
+        [
+            [
+                _cell("مبنای تعیین حد مجاز مواجهه", 0, 0),
+                _cell("نمادها", 0, 1),
+                _cell("حد مجاز مواجهه شغلی STEL/C", 0, 2),
+                _cell("TWA", 0, 3),
+                _cell("وزن ملکولی", 0, 4),
+                _cell("نام علمی ماده شیمیایی", 0, 5),
+                _cell("ردیف", 0, 6),
+            ],
+            [
+                _cell("effect", 1, 0),
+                _cell("A4", 1, 1),
+                _cell("", 1, 2),
+                _cell("1mg/m3", 1, 3),
+                _cell("Aluminum metal [7429-90-5]", 1, 5),
+                _cell("۳۲", 1, 6),
+            ],
+        ]
+    )
+
+    expanded, count = _expand_oel_limit_columns(table)
+
+    assert count == 0
+    assert expanded is table
+
+
+def test_expand_oel_limit_columns_skips_non_oel_table():
+    from goldset_generator.structural_resolver import _expand_oel_limit_columns
+
+    table = ExtractedTableRecord(
+        table_id="table_noise_01",
+        page_number=240,
+        table_type="noise_limits",
+        rows=[[_cell("Level", 0, 0), _cell("dB", 0, 1)]],
+        structural_confidence=0.9,
+        raw_markdown="",
+    )
+
+    expanded, count = _expand_oel_limit_columns(table)
+
+    assert count == 0
+    assert expanded is table
+
+
+def test_expand_oel_basis_symbols_column_page_51():
+    from goldset_generator.structural_resolver import (
+        _expand_oel_basis_symbols_column,
+    )
+
+    table = ExtractedTableRecord(
+        table_id="table_051_01",
+        page_number=51,
+        table_type="chemical_oel",
+        structural_confidence=0.9333,
+        raw_markdown="",
+        rows=[
+            [
+                ExtractedCellRecord(
+                    cell_id="h0",
+                    table_id="table_051_01",
+                    page_number=51,
+                    row=0,
+                    column=0,
+                    text="مبنای تعیین حد نمادها مجاز مواجهه",
+                    bbox=None,
+                    confidence=None,
+                    bbox_confidence=None,
+                    bbox_source=None,
+                    source="document_ai",
+                ),
+                ExtractedCellRecord(
+                    cell_id="h1",
+                    table_id="table_051_01",
+                    page_number=51,
+                    row=0,
+                    column=1,
+                    text="حد مجاز مواجهه شغلی STEL/C",
+                    bbox=None,
+                    confidence=None,
+                    bbox_confidence=None,
+                    bbox_source=None,
+                    source="document_ai",
+                ),
+                ExtractedCellRecord(
+                    cell_id="h2",
+                    table_id="table_051_01",
+                    page_number=51,
+                    row=0,
+                    column=2,
+                    text="TWA",
+                    bbox=None,
+                    confidence=None,
+                    bbox_confidence=None,
+                    bbox_source=None,
+                    source="document_ai",
+                ),
+                ExtractedCellRecord(
+                    cell_id="h3",
+                    table_id="table_051_01",
+                    page_number=51,
+                    row=0,
+                    column=3,
+                    text="وزن ملکولی",
+                    bbox=None,
+                    confidence=None,
+                    bbox_confidence=None,
+                    bbox_source=None,
+                    source="document_ai",
+                ),
+                ExtractedCellRecord(
+                    cell_id="h4",
+                    table_id="table_051_01",
+                    page_number=51,
+                    row=0,
+                    column=4,
+                    text="نام علمی ماده شیمیایی",
+                    bbox=None,
+                    confidence=None,
+                    bbox_confidence=None,
+                    bbox_source=None,
+                    source="document_ai",
+                ),
+                ExtractedCellRecord(
+                    cell_id="h5",
+                    table_id="table_051_01",
+                    page_number=51,
+                    row=0,
+                    column=5,
+                    text="ردیف",
+                    bbox=None,
+                    confidence=None,
+                    bbox_confidence=None,
+                    bbox_source=None,
+                    source="document_ai",
+                ),
+            ],
+        ],
+    )
+
+    expanded, count = _expand_oel_basis_symbols_column(table)
+
+    assert count == 1
+    assert len(expanded.rows[0]) == 7
+
+    cells = {
+        cell.column: cell
+        for cell in expanded.rows[0]
+    }
+
+    assert cells[0].text == "مبنای تعیین حد مجاز مواجهه"
+    assert cells[1].text == "نمادها"
+    assert cells[2].text == "حد مجاز مواجهه شغلی STEL/C"
+    assert cells[3].text == "TWA"
+    assert cells[4].text == "وزن ملکولی"
+    assert cells[5].text == "نام علمی ماده شیمیایی"
+    assert cells[6].text == "ردیف"

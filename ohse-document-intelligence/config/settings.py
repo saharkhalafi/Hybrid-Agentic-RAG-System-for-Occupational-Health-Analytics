@@ -58,10 +58,27 @@ class Settings(BaseSettings):
         description="Embedding dimension — must match the configured embedding model",
     )
 
-    # LLM / Embeddings
-    google_api_key: str | None = None
+    # ============================================================
+    # Gemini API
+    # ============================================================
+
+    gemini_api_key: str | None = None
+    gemini_api_url: str = (
+        "https://generativelanguage.googleapis.com/v1beta"
+    )
+
+    # LLM
     llm_model: str = "gemini-2.5-pro"
+
+    # Embedding
     embedding_model: str = "gemini-embedding-001"
+
+    # Gemini Embedding 001 supports 128-3072 dimensions.
+    # 3072 is the default/highest-quality dimension.
+    vector_dimension: int = Field(
+        ...,
+        description="Embedding dimension — must match the configured embedding model",
+    )
 
     # Document processing
     ocr_language_codes: str = "fa,en"
@@ -70,6 +87,8 @@ class Settings(BaseSettings):
     chunk_overlap: int = 150
     default_page_limit: int = 10
     bbox_confidence_threshold: float = 0.85
+ 
+
 
     # Goldset generation
     goldset_pipeline_version: str = "1.0.0"

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import uuid
 from typing import Any
+from document_ai.logical_row_reconstructor import reconstruct_logical_rows
 
 from document_ai.adapters.bbox import (
     extract_bbox_from_block,
@@ -54,6 +55,12 @@ def _parse_table_block(
 ) -> ExtractionTable:
     header_rows = table_block.get("headerRows") or table_block.get("header_rows") or []
     body_rows = table_block.get("bodyRows") or table_block.get("body_rows") or []
+
+# Document AI Layout Parser may split one logical table row
+# into multiple physical rows. Reconstruct logical rows before
+# converting them into our canonical ExtractionRow model.
+    body_rows = reconstruct_logical_rows(body_rows)
+
     all_rows = list(header_rows) + list(body_rows)
 
     rows: list[ExtractionRow] = []

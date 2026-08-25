@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from agents.structured.authority import StructuredAuthorityError, validate_authoritative_oel_row
+from agents.structured.no_data_reason import NoDataReason
 from agents.structured.store import PostgresStructuredStore
 
 
@@ -14,6 +16,7 @@ class StructuredAgentResult:
     data: dict[str, Any] = field(default_factory=dict)
     citations: list[dict[str, Any]] = field(default_factory=list)
     error: str | None = None
+    no_data_reason: str | None = None
     latency_ms: float = 0.0
 
     def to_dict(self) -> dict[str, Any]:
@@ -22,6 +25,7 @@ class StructuredAgentResult:
             "data": self.data,
             "citations": self.citations,
             "error": self.error,
+            "no_data_reason": self.no_data_reason,
             "latency_ms": self.latency_ms,
         }
 
@@ -70,7 +74,25 @@ class StructuredAgent:
             oel_type=oel_type,
         )
         if not result or result.get("value") is None:
-            return StructuredAgentResult(success=False, error="no_data", latency_ms=_ms(t0))
+            reason = self.store.classify_no_data_reason(
+                chemical_name=slots.get("chemical_name"),
+                cas=slots.get("cas"),
+                chemical_id=slots.get("chemical_id"),
+            )
+            return StructuredAgentResult(
+                success=False,
+                error="no_data",
+                no_data_reason=reason.value,
+                latency_ms=_ms(t0),
+            )
+        try:
+            validate_authoritative_oel_row(
+                result,
+                expected_chemical_id=slots.get("chemical_id"),
+                expected_cas=slots.get("cas"),
+            )
+        except StructuredAuthorityError as exc:
+            return StructuredAgentResult(success=False, error=f"authority_violation:{exc}", latency_ms=_ms(t0))
         citation = {
             "source_type": "structured",
             "table": "oel_chemical_limits",
@@ -95,8 +117,26 @@ class StructuredAgent:
         elif slots.get("chemical_name"):
             rows = self.store.get_oel_by_chemical(slots["chemical_name"])
         if not rows:
-            return StructuredAgentResult(success=False, error="no_data", latency_ms=_ms(t0))
+            reason = self.store.classify_no_data_reason(
+                chemical_name=slots.get("chemical_name"),
+                cas=slots.get("cas"),
+                chemical_id=slots.get("chemical_id"),
+            )
+            return StructuredAgentResult(
+                success=False,
+                error="no_data",
+                no_data_reason=reason.value,
+                latency_ms=_ms(t0),
+            )
         row = rows[0]
+        try:
+            validate_authoritative_oel_row(
+                row,
+                expected_chemical_id=slots.get("chemical_id"),
+                expected_cas=slots.get("cas"),
+            )
+        except StructuredAuthorityError as exc:
+            return StructuredAgentResult(success=False, error=f"authority_violation:{exc}", latency_ms=_ms(t0))
         data = {
             "chemical_name": row.get("english_name"),
             "cas": row.get("cas"),

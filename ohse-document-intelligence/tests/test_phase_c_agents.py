@@ -137,6 +137,10 @@ class TestStructuredAgentMock:
             "source_row_key": "table_046_01:row_2",
             "page_number": 46,
             "chemical_name": "Benzene",
+            "validation_status": "accepted",
+            "gold_artifact_path": "canonical_evidence_v1",
+            "cas": "71-43-2",
+            "chemical_id": "test-chemical-id",
         }
         agent = StructuredAgent(store)
         res = agent.execute("STRUCTURED.OEL.TWA_LOOKUP", {"chemical_name": "Benzene"})

@@ -27,7 +27,7 @@ class RetrievalMode(str, Enum):
 
 @dataclass
 class RetrievalConfig:
-    mode: RetrievalMode = RetrievalMode.HYBRID_RERANK
+    mode: RetrievalMode = RetrievalMode.VECTOR_METADATA
     candidate_k: int = 30
     final_k: int = 5
     rrf_k: int = 60
@@ -97,6 +97,17 @@ def _metadata_filter(candidates: list[dict[str, Any]], page: int | None) -> list
         return candidates
     filtered = [c for c in candidates if c.get("page_number") == page]
     return filtered if filtered else candidates
+
+
+def _apply_page_scope(
+    vector_hits: list[dict[str, Any]],
+    lexical: list[dict[str, Any]],
+    page: int | None,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Apply identical page scoping to vector and lexical candidate pools."""
+    if page is None:
+        return vector_hits, lexical
+    return _metadata_filter(vector_hits, page), _metadata_filter(lexical, page)
 
 
 def _merge_vector_lexical(
@@ -204,10 +215,14 @@ class ProductionRetrievalPipeline:
                 trace=trace,
             )
 
-        # Lexical candidates — used for supplemental fusion only
+        # Lexical candidates — page scope must match vector path (see scope_audit.py)
         lex_index = get_lexical_index(self.session)
         lexical = lex_index.search(query, limit=cfg.candidate_k)
         trace.append(f"lexical:{len(lexical)}")
+
+        if page:
+            vector_hits, lexical = _apply_page_scope(vector_hits, lexical, page)
+            trace.append("page_scope_filter")
 
         if cfg.mode == RetrievalMode.VECTOR_LEXICAL:
             # Vector-first: rerank vector pool with lexical scores; avoid full RRF pollution
@@ -224,9 +239,6 @@ class ProductionRetrievalPipeline:
             )
 
         # HYBRID_FUSION or HYBRID_RERANK (default production)
-        if page:
-            vector_hits = _metadata_filter(vector_hits, page)
-            trace.append("metadata_filter")
         merged = _merge_vector_lexical(vector_hits, lexical, limit=cfg.candidate_k)
         reranker = cfg.reranker or LexicalReranker()
         cands = candidates_from_search_results(merged)

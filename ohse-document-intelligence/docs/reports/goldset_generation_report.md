@@ -1,27 +1,27 @@
 # Goldset Generation Report
 
-Pages processed: **144–144**
+Pages processed: **1–360**
 
 ## Summary
 
-- Pages processed: 67
+- Pages processed: 360
 - Pages skipped (review protection): 0
-- Tables detected (Document AI): 0
-- Tables recovered (structural resolver): 1
-- Merged cells flagged: 0
-- Document AI evidence cells: 0
-- Structural layer cells: 50
-- Entities accepted: 1892
-- Knowledge triples accepted: 1763
-- QA items accepted: 980
-- Numeric validation failures: 28
-- Cells missing bbox (extracted fields): 0
-- Review queue items: 1
-- Semantic text chunks: 0
-- Semantic chunks requiring review: 8
+- Tables detected (Document AI): 10
+- Tables recovered (structural resolver): 50
+- Merged cells flagged: 25
+- Document AI evidence cells: 512
+- Structural layer cells: 3167
+- Entities accepted: 1857
+- Knowledge triples accepted: 1722
+- QA items accepted: 948
+- Numeric validation failures: 96
+- Cells missing bbox (extracted fields): 70
+- Review queue items: 580
+- Semantic text chunks: 561
+- Semantic chunks requiring review: 462
 - Overwrite prevented: 0
-- Evidence manifest: `E:\cursor projects\HSE6 AI Agent\ohse-document-intelligence\data\evidence\99ff7638e239_144-144`
-- Canonical grids written: 1
-- Canonical tables written: 1
+- Evidence manifest: `data\evidence\f9fef9ca5944_1-360`
+- Canonical grids written: 59
+- Canonical tables written: 59
 
-Validated structure: `E:\cursor projects\HSE6 AI Agent\ohse-document-intelligence\data\intermediate\validated_structure_144-144.json`
+Validated structure: `E:\cursor projects\HSE6 AI Agent\ohse-document-intelligence\data\intermediate\validated_structure_1-360.json`

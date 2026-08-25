@@ -17,6 +17,14 @@ from agents.evaluation.harness import evaluate_router, evaluate_by_category, res
 OUT_DIR = PROJECT_ROOT / "data" / "evaluation" / "phase_c3_results"
 BASELINE_DIR = PROJECT_ROOT / "data" / "evaluation"
 
+
+def _percentile(values: list[float], pct: float) -> float:
+    if not values:
+        return 0.0
+    ordered = sorted(values)
+    idx = min(len(ordered) - 1, max(0, int(round((pct / 100.0) * (len(ordered) - 1)))))
+    return ordered[idx]
+
 # Phase C.2 baseline (from reports)
 PHASE_C2_BASELINE = {
     "router_intent_accuracy": 0.7572,
@@ -56,12 +64,22 @@ def benchmark_retrieval_modes(session, *, limit: int | None = None) -> dict[str,
         cfg = RetrievalConfig(mode=mode, candidate_k=30, final_k=5, reranker=reranker)
         pipeline = ProductionRetrievalPipeline(session, config=cfg)
         from retrieval.eval_metrics import recall_at_k, mrr, ndcg_at_k, precision_at_k
+        from persistence.semantic_store import embed_query_vector
+
+        query_vectors: dict[str, list[float]] = {}
+        for case in cases:
+            if case.query not in query_vectors:
+                query_vectors[case.query] = embed_query_vector(case.query)
 
         rows = []
         latencies = []
         for case in cases:
             t0 = time.perf_counter()
-            res = pipeline.retrieve(case.query, page_hint=case.page_number)
+            res = pipeline.retrieve(
+                case.query,
+                page_hint=case.page_number,
+                query_vector=query_vectors[case.query],
+            )
             latencies.append((time.perf_counter() - t0) * 1000)
             retrieved = [c.get("chunk_id", "") for c in res.chunks]
             rows.append({"retrieved": retrieved, "relevant": case.relevant_chunk_ids, "graded": case.graded})
@@ -77,6 +95,8 @@ def benchmark_retrieval_modes(session, *, limit: int | None = None) -> dict[str,
             "ndcg_at_10": sum(ndcg_at_k(r["retrieved"], r["graded"], 10) for r in rows) / n if n else 0,
             "precision_at_5": sum(precision_at_k(r["retrieved"], r["relevant"], 5) for r in rows) / n if n else 0,
             "avg_latency_ms": sum(latencies) / len(latencies) if latencies else 0,
+            "p50_latency_ms": _percentile(latencies, 50),
+            "p95_latency_ms": _percentile(latencies, 95),
             "n_queries": n,
         }
     return results

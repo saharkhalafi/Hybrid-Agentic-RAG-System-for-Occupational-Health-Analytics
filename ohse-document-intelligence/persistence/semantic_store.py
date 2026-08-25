@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -168,6 +169,8 @@ def sync_semantic_production_corpus(
     *,
     rag_dir: Path | None = None,
     settings: Settings | None = None,
+    content_hash: str | None = None,
+    filename: str | None = None,
 ) -> SemanticSyncStats:
     """Sync ONLY accepted Persian semantic_text_production.jsonl → document_chunks."""
     settings = settings or get_settings()
@@ -180,14 +183,23 @@ def sync_semantic_production_corpus(
             f"Missing {PRODUCTION_JSONL}. Run semantic promotion first."
         )
 
-    content_hash, filename = resolve_document_content_hash(settings)
-    document = ensure_document(session, content_hash=content_hash, filename=filename, settings=settings)
+    if content_hash:
+        resolved_hash = content_hash
+        resolved_filename = filename or "OHE6.pdf"
+    else:
+        resolved_hash, resolved_filename = resolve_document_content_hash(settings)
+    document = ensure_document(
+        session,
+        content_hash=resolved_hash,
+        filename=resolved_filename,
+        settings=settings,
+    )
 
     # Remove duplicate semantic rows tied to other OHE6 document records.
     stale_ids = session.scalars(
         select(Document.id).where(
-            Document.filename == filename,
-            Document.content_hash != content_hash,
+            Document.filename == resolved_filename,
+            Document.content_hash != resolved_hash,
         )
     ).all()
     if stale_ids:
@@ -327,10 +339,8 @@ def _embed_batch(
     try:
         vectors = embedder.embed_texts(texts)
     except Exception as exc:
-        for chunk in valid:
-            stats.embed_failed += 1
-            stats.unresolved.append(f"{chunk.chunk_id}: batch_error:{exc}")
         logger.warning("semantic_embed_batch_failed", error=str(exc), size=len(texts))
+        _embed_batch_with_retry(session, valid, embedder, settings, stats, batch_error=str(exc))
         return
 
     for chunk, vector in zip(valid, vectors, strict=True):
@@ -345,6 +355,46 @@ def _embed_batch(
         chunk.embedding_version = EMBEDDING_VERSION
         chunk.embedding_dimension = embedder.dimension
         stats.embedded += 1
+
+
+def _embed_batch_with_retry(
+    session: Session,
+    chunks: list[DocumentChunk],
+    embedder: EmbeddingService,
+    settings: Settings,
+    stats: SemanticSyncStats,
+    *,
+    batch_error: str,
+    max_retries: int = 3,
+) -> None:
+    """Retry failed batch one chunk at a time with backoff (API timeout/rate-limit recovery)."""
+    for chunk in chunks:
+        text = (chunk.content or "").strip()
+        if not text:
+            stats.embed_failed += 1
+            stats.unresolved.append(f"{chunk.chunk_id}: empty_content")
+            continue
+        last_exc = batch_error
+        for attempt in range(max_retries):
+            try:
+                vectors = embedder.embed_texts([text])
+                if not vectors or len(vectors[0]) != embedder.dimension:
+                    raise ValueError(
+                        f"dimension_mismatch:{len(vectors[0]) if vectors else 0}!={embedder.dimension}"
+                    )
+                chunk.embedding = vectors[0]
+                chunk.embedding_model = settings.embedding_model
+                chunk.embedding_version = EMBEDDING_VERSION
+                chunk.embedding_dimension = embedder.dimension
+                stats.embedded += 1
+                break
+            except Exception as exc:
+                last_exc = str(exc)
+                if attempt < max_retries - 1:
+                    time.sleep(0.5 * (attempt + 1))
+        else:
+            stats.embed_failed += 1
+            stats.unresolved.append(f"{chunk.chunk_id}: retry_error:{last_exc}")
 
 
 def _chunk_to_retrieval_result(chunk: DocumentChunk, score: float) -> SemanticRetrievalResult:
@@ -507,3 +557,221 @@ def count_production_semantic_chunks(session: Session) -> dict[str, int]:
         .where(*filters, DocumentChunk.embedding.is_not(None))
     ) or 0
     return {"accepted_semantic": accepted, "embedded_semantic": embedded}
+
+
+def retire_stale_document_chunks(
+    session: Session,
+    *,
+    document_id: uuid.UUID,
+    active_chunk_ids: set[str],
+    source_types: tuple[str, ...] = (SEMANTIC_SOURCE_TYPE, "row_knowledge", "evidence_cell"),
+    pipeline_version: str = "canonical_evidence_v1",
+) -> int:
+    """Mark stale accepted chunks legacy_reference and clear embeddings."""
+    from datetime import UTC, datetime
+
+    retired = 0
+    rows = session.scalars(
+        select(DocumentChunk).where(
+            DocumentChunk.document_id == document_id,
+            DocumentChunk.source_type.in_(source_types),
+            DocumentChunk.validation_status == SEMANTIC_VALIDATION_STATUS,
+        )
+    ).all()
+    for row in rows:
+        if row.chunk_id and row.chunk_id in active_chunk_ids:
+            continue
+        row.validation_status = "legacy_reference"
+        row.embedding = None
+        row.embedding_model = None
+        row.embedding_version = None
+        row.embedding_dimension = None
+        metadata = dict(row.metadata_ or {})
+        metadata.update(
+            {
+                "retired_by": pipeline_version,
+                "retired_at": datetime.now(UTC).isoformat(),
+            }
+        )
+        row.metadata_ = metadata
+        retired += 1
+    session.flush()
+    return retired
+
+
+def retire_stale_ohe6_chunks_globally(
+    session: Session,
+    *,
+    canonical_document_id: uuid.UUID,
+    active_chunk_ids: set[str],
+    filename: str = "OHE6.pdf",
+    pipeline_version: str = "canonical_evidence_v1",
+) -> dict[str, int]:
+    """Retire stale chunks on all OHE6 documents; canonical doc uses active set."""
+    from sqlalchemy import func
+
+    doc_ids = list(
+        session.scalars(select(Document.id).where(Document.filename == filename)).all()
+    )
+    per_doc: dict[str, int] = {}
+    for doc_id in doc_ids:
+        if doc_id == canonical_document_id:
+            count = retire_stale_document_chunks(
+                session,
+                document_id=doc_id,
+                active_chunk_ids=active_chunk_ids,
+                pipeline_version=pipeline_version,
+            )
+        else:
+            count = retire_stale_document_chunks(
+                session,
+                document_id=doc_id,
+                active_chunk_ids=set(),
+                pipeline_version=pipeline_version,
+            )
+        per_doc[str(doc_id)] = count
+    return per_doc
+
+
+def embed_pending_production_chunks(
+    session: Session,
+    *,
+    settings: Settings | None = None,
+    batch_size: int = 16,
+    commit_every: int = 4,
+    include_canonical_row_knowledge: bool = True,
+    canonical_gold_path: str = "canonical_evidence_v1",
+) -> SemanticSyncStats:
+    """Embed accepted semantic_text and canonical row_knowledge chunks lacking embeddings."""
+    settings = settings or get_settings()
+    stats = SemanticSyncStats()
+    embedder = get_embedding_service()
+
+    if not embedder.available():
+        raise RuntimeError("Embedding service unavailable — check GCP credentials")
+
+    source_types = [SEMANTIC_SOURCE_TYPE]
+    if include_canonical_row_knowledge:
+        source_types.append("row_knowledge")
+
+    pending = session.scalars(
+        select(DocumentChunk)
+        .where(
+            DocumentChunk.source_type.in_(source_types),
+            DocumentChunk.validation_status == SEMANTIC_VALIDATION_STATUS,
+            DocumentChunk.embedding.is_(None),
+        )
+        .order_by(DocumentChunk.chunk_id)
+    ).all()
+
+    if include_canonical_row_knowledge:
+        pending = [
+            chunk
+            for chunk in pending
+            if chunk.source_type == SEMANTIC_SOURCE_TYPE
+            or chunk.gold_artifact_path == canonical_gold_path
+        ]
+
+    logger.info("production_embed_start", pending=len(pending), batch_size=batch_size)
+
+    batch: list[DocumentChunk] = []
+    for chunk in pending:
+        batch.append(chunk)
+        if len(batch) < batch_size:
+            continue
+        stats.embed_batches += 1
+        _embed_batch(session, batch, embedder, settings, stats)
+        batch = []
+        if stats.embed_batches % commit_every == 0:
+            session.flush()
+
+    if batch:
+        stats.embed_batches += 1
+        _embed_batch(session, batch, embedder, settings, stats)
+
+    session.flush()
+    return stats
+
+
+def embed_target_chunks(
+    session: Session,
+    chunks: list[DocumentChunk],
+    *,
+    settings: Settings | None = None,
+    batch_size: int = 16,
+    commit_every: int = 4,
+) -> SemanticSyncStats:
+    """Embed an explicit chunk list (preflight / scoped rebuild)."""
+    settings = settings or get_settings()
+    stats = SemanticSyncStats()
+    embedder = get_embedding_service()
+
+    if not embedder.available():
+        raise RuntimeError("Embedding service unavailable — check GCP credentials")
+    if not chunks:
+        return stats
+
+    logger.info("target_embed_start", pending=len(chunks), batch_size=batch_size)
+
+    batch: list[DocumentChunk] = []
+    for chunk in chunks:
+        batch.append(chunk)
+        if len(batch) < batch_size:
+            continue
+        stats.embed_batches += 1
+        _embed_batch(session, batch, embedder, settings, stats)
+        batch = []
+        if stats.embed_batches % commit_every == 0:
+            session.flush()
+
+    if batch:
+        stats.embed_batches += 1
+        _embed_batch(session, batch, embedder, settings, stats)
+
+    session.flush()
+    return stats
+
+
+def verify_chunk_embeddings(
+    chunks: list[DocumentChunk],
+    *,
+    embedder: EmbeddingService | None = None,
+) -> dict[str, Any]:
+    """Validate embeddings exist with expected dimension and non-empty content."""
+    embedder = embedder or get_embedding_service()
+    expected_dim = embedder.dimension
+    failures: list[str] = []
+    for chunk in chunks:
+        content_len = len((chunk.content or "").strip())
+        if content_len == 0:
+            failures.append(f"{chunk.chunk_id}: empty_content")
+            continue
+        if chunk.embedding is None:
+            failures.append(f"{chunk.chunk_id}: missing_embedding")
+            continue
+        dim = chunk.embedding_dimension or len(chunk.embedding)
+        if dim != expected_dim:
+            failures.append(f"{chunk.chunk_id}: dimension_mismatch:{dim}!={expected_dim}")
+    return {
+        "passed": not failures,
+        "checked": len(chunks),
+        "expected_dimension": expected_dim,
+        "failures": failures,
+    }
+
+
+def verify_pgvector_state(session: Session) -> dict[str, Any]:
+    from sqlalchemy import func, text
+
+    extension = session.scalar(text("SELECT EXISTS(SELECT 1 FROM pg_extension WHERE extname = 'vector')"))
+    embedded_any = session.scalar(
+        select(func.count())
+        .select_from(DocumentChunk)
+        .where(DocumentChunk.embedding.is_not(None))
+    ) or 0
+    return {
+        "pgvector_extension_installed": bool(extension),
+        "total_embedded_chunks": embedded_any,
+        "note": "3072-dim embeddings use sequential scan (no HNSW index per migration 005)",
+    }
+

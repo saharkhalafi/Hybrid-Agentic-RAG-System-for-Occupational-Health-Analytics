@@ -24,6 +24,20 @@ _LIMIT_TYPE_TYPO_REPLACEMENTS = (
     (r"\bceiling\b", "Ceiling"),
 )
 
+_LIMIT_TYPE_LEADING_RE = re.compile(
+    r"^(?:TWA|STEL|CEILING|C)\s+(?:for\s+)?(.+)$",
+    re.IGNORECASE,
+)
+
+
+def strip_limit_type_prefix(query: str) -> str:
+    """Remove leading limit-type tokens so entity phrases can be resolved (e.g. 'TWA benzene')."""
+    q = (query or "").strip()
+    match = _LIMIT_TYPE_LEADING_RE.match(q)
+    if match:
+        return match.group(1).strip()
+    return q
+
 
 def normalize_persian_query(query: str) -> str:
     q = (query or "").strip()

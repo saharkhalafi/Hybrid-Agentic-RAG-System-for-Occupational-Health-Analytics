@@ -5,12 +5,16 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
+from agents.structured.no_data_reason import NoDataReason
 from database.models import ChemicalRegistry, OELChemicalLimit
 from goldset_generator.oel_row_parser import parse_molecular_weight
 from pipeline_contracts.numeric_integrity import try_normalize
+
+CANONICAL_GOLD_ARTIFACT_PATH = "canonical_evidence_v1"
+ACCEPTED_VALIDATION_STATUS = "accepted"
 
 
 class PostgresStructuredStore:
@@ -67,39 +71,39 @@ class PostgresStructuredStore:
         return self._limits_for_chemical(chem_obj)
 
     def _limits_for_chemical(self, chem: ChemicalRegistry) -> list[dict[str, Any]]:
-        for status in ("accepted", "legacy_reference"):
-            limits = self.session.scalars(
-                select(OELChemicalLimit).where(
-                    OELChemicalLimit.chemical_id == chem.id,
-                    OELChemicalLimit.validation_status == status,
-                ).order_by(OELChemicalLimit.source_row_key.asc().nulls_last())
-            ).all()
-            if not limits:
-                continue
-            results = []
-            for lim in limits:
-                prov = lim.source_cell_provenance or {}
-                results.append({
-                    "id": str(lim.id),
-                    "chemical_id": str(chem.id),
-                    "cas": chem.cas,
-                    "english_name": lim.english_name or chem.english_name,
-                    "persian_name": lim.persian_name or chem.persian_name,
-                    "twa": lim.twa,
-                    "stel": lim.stel,
-                    "ceiling": lim.ceiling,
-                    "unit": lim.unit,
-                    "source_row_key": lim.source_row_key,
-                    "page_number": lim.page_number,
-                    "gold_artifact_path": lim.gold_artifact_path,
-                    "provenance": prov,
-                    "original_values": lim.original_values,
-                    "accepted_values": lim.accepted_values,
-                    "validation_status": status,
-                    "molecular_weight": chem.molecular_weight,
-                })
-            return results
-        return []
+        limits = self.session.scalars(
+            select(OELChemicalLimit).where(
+                OELChemicalLimit.chemical_id == chem.id,
+                OELChemicalLimit.validation_status == ACCEPTED_VALIDATION_STATUS,
+                OELChemicalLimit.gold_artifact_path == CANONICAL_GOLD_ARTIFACT_PATH,
+            ).order_by(OELChemicalLimit.source_row_key.asc().nulls_last())
+        ).all()
+        if not limits:
+            return []
+
+        results = []
+        for lim in limits:
+            prov = lim.source_cell_provenance or {}
+            results.append({
+                "id": str(lim.id),
+                "chemical_id": str(chem.id),
+                "cas": chem.cas,
+                "english_name": lim.english_name or chem.english_name,
+                "persian_name": lim.persian_name or chem.persian_name,
+                "twa": lim.twa,
+                "stel": lim.stel,
+                "ceiling": lim.ceiling,
+                "unit": lim.unit,
+                "source_row_key": lim.source_row_key,
+                "page_number": lim.page_number,
+                "gold_artifact_path": lim.gold_artifact_path,
+                "provenance": prov,
+                "original_values": lim.original_values,
+                "accepted_values": lim.accepted_values,
+                "validation_status": ACCEPTED_VALIDATION_STATUS,
+                "molecular_weight": chem.molecular_weight,
+            })
+        return results
 
     @staticmethod
     def _chem_dict(chem: ChemicalRegistry) -> dict[str, Any]:
@@ -132,7 +136,8 @@ class PostgresStructuredStore:
         limits = self.session.scalars(
             select(OELChemicalLimit).where(
                 OELChemicalLimit.chemical_id == chem_row.id,
-                OELChemicalLimit.validation_status == "accepted",
+                OELChemicalLimit.validation_status == ACCEPTED_VALIDATION_STATUS,
+                OELChemicalLimit.gold_artifact_path == CANONICAL_GOLD_ARTIFACT_PATH,
             )
         ).all()
 
@@ -180,6 +185,47 @@ class PostgresStructuredStore:
             }
         return None
 
+    def classify_no_data_reason(
+        self,
+        *,
+        chemical_name: str | None = None,
+        cas: str | None = None,
+        chemical_id: str | None = None,
+    ) -> NoDataReason:
+        chem_row: ChemicalRegistry | None = None
+        if chemical_id:
+            chem_row = self.session.get(ChemicalRegistry, chemical_id)
+        elif cas:
+            chem_row = self.session.scalar(select(ChemicalRegistry).where(ChemicalRegistry.cas == cas))
+        elif chemical_name:
+            chem_data = self.get_chemical_by_alias(chemical_name)
+            if chem_data:
+                chem_row = self.session.get(ChemicalRegistry, chem_data["id"])
+        if not chem_row:
+            return NoDataReason.UNKNOWN_CHEMICAL
+
+        canonical_count = self.session.scalar(
+            select(func.count())
+            .select_from(OELChemicalLimit)
+            .where(
+                OELChemicalLimit.chemical_id == chem_row.id,
+                OELChemicalLimit.validation_status == ACCEPTED_VALIDATION_STATUS,
+                OELChemicalLimit.gold_artifact_path == CANONICAL_GOLD_ARTIFACT_PATH,
+            )
+        ) or 0
+        if canonical_count == 0:
+            legacy_count = self.session.scalar(
+                select(func.count())
+                .select_from(OELChemicalLimit)
+                .where(
+                    OELChemicalLimit.chemical_id == chem_row.id,
+                    OELChemicalLimit.validation_status == "legacy_reference",
+                )
+            ) or 0
+            if legacy_count > 0:
+                return NoDataReason.PENDING_PROMOTION
+        return NoDataReason.UNKNOWN_CHEMICAL
+
     def lookup_oel_field(
         self,
         *,
@@ -222,6 +268,9 @@ class PostgresStructuredStore:
             "bbox": bbox,
             "original_value": original,
             "cas": row.get("cas"),
+            "chemical_id": row.get("chemical_id"),
             "chemical_name": row.get("english_name") or row.get("persian_name"),
             "record_id": row.get("id"),
+            "gold_artifact_path": row.get("gold_artifact_path"),
+            "validation_status": row.get("validation_status"),
         }

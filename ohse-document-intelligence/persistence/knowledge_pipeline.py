@@ -3,7 +3,7 @@
 Only accepted Gold artifacts enter production knowledge tables.
 Candidates and non-gold_allowed tables are rejected.
 """
-
+#knowledge_pipeline.py
 from __future__ import annotations
 
 import hashlib
@@ -26,7 +26,75 @@ from knowledge.metadata_contract import FieldProvenance, KnowledgeMetadata, Sour
 logger = get_logger(__name__)
 
 PERSIAN_DIGIT = str.maketrans("۰۱۲۳۴۵۶۷۸۹", "0123456789")
-CAS_PATTERN = re.compile(r"\b(\d{2,7}-\d{2}-\d)\b")
+
+# NOTE: tolerates internal spacing around the hyphens (e.g.
+# "135410 - 20 - 7"), consistent with the CAS_PATTERN used throughout
+# the rest of the pipeline (goldset_generator.structural_resolver,
+# ingestion.merged_row_splitter, document_ai.geometry_resolver). Gold
+# table "original_value" fields preserve the raw source text verbatim,
+# so they can still carry OCR/PDF spacing artifacts even after Layer 2
+# normalizes the accepted "value" field.
+CAS_PATTERN = re.compile(r"\d{2,7}\s*-\s*\d{2}\s*-\s*\d")
+
+
+def _normalize_extracted_cas(value: str) -> str:
+    """
+    Collapse whitespace inside a raw CAS_PATTERN match so it matches the
+    canonical bare-digit form stored in chemical_registry.cas, e.g.
+    "135410 - 20 - 7" and "135410-20-7" both normalize to
+    "135410-20-7".
+
+    Must stay in sync with normalize_cas() in
+    goldset_generator.structural_resolver and _normalize_cas() in
+    ingestion.merged_row_splitter — all three anchor on the same
+    canonical CAS identity.
+    """
+
+    return re.sub(r"\s+", "", value)
+
+
+# ============================================================================
+# GOLD TABLE ACCEPTANCE GATE
+# ============================================================================
+#
+# A production Gold table artifact is accepted either when it carries an
+# explicit "gold_allowed" flag (top-level, or inside "table_quality"), or
+# — when neither is present — when every one of the five structural
+# quality sub-flags inside "table_quality" is true. That fallback exists
+# because the Gold table schema (see table_quality shape in
+# tests/test_run_table_pipeline_all_pages.py's _sample_diag()) records
+# quality as five independent booleans and never actually sets an
+# aggregate "gold_allowed" key anywhere. Without this fallback, a
+# structurally-correct table (all five sub-flags true) is silently
+# rejected here just because nothing upstream ever wrote the aggregate
+# flag — this was the actual cause of table_055_01 failing to reach
+# production even after its Layer 2 structural issues were fixed.
+# ============================================================================
+
+_TABLE_QUALITY_GATE_FLAGS = (
+    "geometry_valid",
+    "header_structure_valid",
+    "merged_cells_valid",
+    "numeric_integrity_valid",
+    "provenance_complete",
+)
+
+
+def _table_quality_passes_gate(quality: dict[str, Any]) -> bool:
+    """
+    True only when every one of _TABLE_QUALITY_GATE_FLAGS is explicitly
+    present AND true. A missing flag is treated as "not proven safe",
+    not as "assumed true" — so an older or incomplete table_quality
+    payload is never silently waved through.
+    """
+
+    if not quality:
+        return False
+
+    if not all(key in quality for key in _TABLE_QUALITY_GATE_FLAGS):
+        return False
+
+    return all(bool(quality.get(key)) for key in _TABLE_QUALITY_GATE_FLAGS)
 
 
 @dataclass
@@ -78,7 +146,7 @@ def _extract_cas(row: dict[str, Any]) -> str | None:
             if candidate:
                 match = CAS_PATTERN.search(str(candidate))
                 if match:
-                    return match.group(1)
+                    return _normalize_extracted_cas(match.group(0))
     for key in ("chemical_name", "Chemical"):
         field_data = row.get(key)
         if isinstance(field_data, dict):
@@ -86,7 +154,7 @@ def _extract_cas(row: dict[str, Any]) -> str | None:
                 if candidate:
                     match = CAS_PATTERN.search(str(candidate))
                     if match:
-                        return match.group(1)
+                        return _normalize_extracted_cas(match.group(0))
     return None
 
 
@@ -108,11 +176,19 @@ def _field_payload(field_data: dict[str, Any] | None) -> dict[str, Any] | None:
 def is_production_gold_table(payload: dict[str, Any], path: Path) -> tuple[bool, str]:
     if "candidates" in path.parts:
         return False, "candidate_path_forbidden"
-    if not payload.get("gold_allowed"):
-        quality = payload.get("table_quality") or {}
-        if not quality.get("gold_allowed"):
-            return False, "gold_not_allowed"
-    return True, "accepted"
+
+    quality = payload.get("table_quality") or {}
+
+    if payload.get("gold_allowed"):
+        return True, "accepted"
+
+    if quality.get("gold_allowed"):
+        return True, "accepted"
+
+    if _table_quality_passes_gate(quality):
+        return True, "accepted"
+
+    return False, "gold_not_allowed"
 
 
 def ensure_document(session: Session, *, content_hash: str, filename: str, settings: Settings) -> Document:

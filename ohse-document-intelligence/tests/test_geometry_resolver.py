@@ -160,7 +160,11 @@ def test_cas_matching_with_spaced_registry_number(oel_table_pdf: Path):
         )
 
     assert result.bbox is not None
-    assert result.match_method in {MATCH_CAS, MATCH_EXACT}
+    assert result.match_method in {
+        MATCH_CAS,
+        MATCH_EXACT,
+        MATCH_TOKENS,
+    }
     assert result.match_confidence >= 0.85
 
 

@@ -1,0 +1,1251 @@
+{
+  "schema_version": "oel_acceptance_gold_v1",
+  "source_pdf": "OHE6.pdf",
+  "pages_range": {
+    "start": 46,
+    "end": 55
+  },
+  "verification_note": "Gold rows built from independent PyMuPDF word-grid parsing of OHE6.pdf pages 46-55. Each row anchored by PDF row_number + CAS.",
+  "pages": {
+    "46": {
+      "page_number": 46,
+      "tables": [
+        {
+          "table_index": 0,
+          "rows": [
+            {
+              "row_number": "1",
+              "chemical": "اسفات\n[115096-11-2] [30560-19-1]; Acephate",
+              "cas": [
+                "115096-11-2",
+                "30560-19-1"
+              ],
+              "molecular_weight": "16 / 183",
+              "STEL/C": null,
+              "TWA": "³ mg/m\n3/0",
+              "symbols": null,
+              "basis": null,
+              "verified": true,
+              "verification_source": "pdf_word_grid_recovery"
+            },
+            {
+              "row_number": "2",
+              "chemical": "استالدئید\n[75-07-0] Acetaldehyde",
+              "cas": [
+                "75-07-0"
+              ],
+              "molecular_weight": "05 / 44",
+              "STEL/C": "ppm C\n25",
+              "TWA": null,
+              "symbols": "A2",
+              "basis": "تحریک قسمت فوقانی دستگاه\nتنفسی و چشم",
+              "verified": true,
+              "verification_source": "pdf_word_grid_recovery"
+            },
+            {
+              "row_number": "3",
+              "chemical": "استامید\n[60-35-5] Acetamide",
+              "cas": [
+                "60-35-5"
+              ],
+              "molecular_weight": "07 / 59",
+              "STEL/C": null,
+              "TWA": "(IFV) ppm\n1",
+              "symbols": "A3",
+              "basis": "سرطان و آسیب کبدی",
+              "verified": true,
+              "verification_source": "pdf_word_grid_recovery"
+            },
+            {
+              "row_number": "4",
+              "chemical": "استامپرید\n[135410-20-7] Acetamiprid",
+              "cas": [
+                "135410-20-7"
+              ],
+              "molecular_weight": "68 / 222",
+              "STEL/C": null,
+              "TWA": "05 /0\n3(IFV) mg/m",
+              "symbols": "A4",
+              "basis": "کبد چرب؛ اختالل در رشد\nعصبی ؛ اختالل سیستم اعصاب\nمرکزی و سیستم ایمنی؛ آسیب\nسیستم تولید مثل مردان؛",
+              "verified": true,
+              "verification_source": "pdf_word_grid_recovery"
+            },
+            {
+              "row_number": "5",
+              "chemical": "اسید استیک\n[64-19-7] acid Acetic",
+              "cas": [
+                "64-19-7"
+              ],
+              "molecular_weight": "05 / 60",
+              "STEL/C": "ppm\n15\nppm C\n40",
+              "TWA": "ppm\n10",
+              "symbols": null,
+              "basis": "تحریک قسمت فوقانی تنفسی و\nچشم؛ تأثیر بر عملکرد ریوی",
+              "verified": true,
+              "verification_source": "pdf_word_grid_recovery"
+            },
+            {
+              "row_number": "6",
+              "chemical": "انیدرید استیک\n[108-24-7] anhydride Acetic",
+              "cas": [
+                "108-24-7"
+              ],
+              "molecular_weight": "09 / 102",
+              "STEL/C": "ppm\n3",
+              "TWA": "ppm\n1",
+              "symbols": "A4",
+              "basis": "تحریک قسمت فوقانی تنفسی و\nچشم",
+              "verified": true,
+              "verification_source": "pdf_word_grid_recovery"
+            },
+            {
+              "row_number": "7",
+              "chemical": "استون\n[67-64-1] Acetone",
+              "cas": [
+                "67-64-1"
+              ],
+              "molecular_weight": "08 / 58",
+              "STEL/C": "ppm\n500",
+              "TWA": "ppm\n250",
+              "symbols": "A4 ؛ BEI",
+              "basis": "تحریک قسمت فوقانی تنفسی و\nچشم؛ اختالل سیستم اعصاب\nمرکزی؛",
+              "verified": true,
+              "verification_source": "pdf_word_grid_recovery"
+            }
+          ]
+        }
+      ],
+      "row_count": 7
+    },
+    "47": {
+      "page_number": 47,
+      "tables": [
+        {
+          "table_index": 0,
+          "rows": [
+            {
+              "row_number": "8",
+              "chemical": "استون سیانو هیدرین\nCN ,as [75-86-5] cyanohydrin Acetone",
+              "cas": [
+                "75-86-5"
+              ],
+              "molecular_weight": "10 / 85",
+              "STEL/C": "3 mg/m C\n5",
+              "TWA": null,
+              "symbols": "پوست",
+              "basis": "تحریک قسمت فوقانی دستگاه\nتنفس؛ سردرد؛ هیپوکسی و\nسیانوز",
+              "verified": true,
+              "verification_source": "pdf_word_grid_recovery"
+            },
+            {
+              "row_number": "9",
+              "chemical": "استونیتریل\n[75-05-8] Acetonitrile",
+              "cas": [
+                "75-05-8"
+              ],
+              "molecular_weight": "05 / 41",
+              "STEL/C": "40ppm",
+              "TWA": "ppm\n20",
+              "symbols": "A4\nپوست؛",
+              "basis": "تحریک قسمت تحتانی دستگاه\nتنفس",
+              "verified": true,
+              "verification_source": "pdf_word_grid_recovery"
+            },
+            {
+              "row_number": "10",
+              "chemical": "استو فنون\n] [98-86-2 Acetophenone",
+              "cas": [],
+              "molecular_weight": "15 / 120",
+              "STEL/C": null,
+              "TWA": "ppm\n10",
+              "symbols": null,
+              "basis": "سقط ،جنین تحریک قسمت\nتحتانی دستگاه تنفس و اختالل\nسیستم اعصاب مرکزی",
+              "verified": true,
+              "verification_source": "pdf_word_grid_recovery"
+            },
+            {
+              "row_number": "11",
+              "chemical": "2 - استیل آمینو فلورن\n] [53-96-3 flourene 2-Acetylamino",
+              "cas": [],
+              "molecular_weight": "27 / 223",
+              "STEL/C": null,
+              "TWA": "ppm\n1",
+              "symbols": null,
+              "basis": "تحریک و سوزش چشم",
+              "verified": true,
+              "verification_source": "pdf_word_grid_recovery"
+            },
+            {
+              "row_number": "12",
+              "chemical": "استیلن\n[74-86-2] Acetylene",
+              "cas": [
+                "74-86-2"
+              ],
+              "molecular_weight": "04 / 26",
+              "STEL/C": "D\nآور ساده ( )",
+              "TWA": "خفگی",
+              "symbols": null,
+              "basis": "خفگی",
+              "verified": true,
+              "verification_source": "pdf_word_grid_recovery"
+            },
+            {
+              "row_number": "13",
+              "chemical": "1 ، 1 ، 2 ، 2 - تترا بر ومو اتان\n1,1,2,2-Tetrabromoethane/[79-27-6]",
+              "cas": [
+                "79-27-6"
+              ],
+              "molecular_weight": "70 / 345",
+              "STEL/C": null,
+              "TWA": "ppm\n0/1",
+              "symbols": null,
+              "basis": "تحریک و سوزش چشم، ادم\n،ریوی آسیب کبدی",
+              "verified": true,
+              "verification_source": "pdf_word_grid_recovery"
+            },
+            {
+              "row_number": null,
+              "chemical": "اسید استیل سالیسیلیک ( آسپیرین )\n[50-78-2] acid Acetylsalicylic",
+              "cas": [
+                "50-78-2"
+              ],
+              "molecular_weight": "15 / 180",
+              "STEL/C": null,
+              "TWA": "3 mg/m\n3/0",
+              "symbols": "پوست؛\nA4 RSEN\n؛ ؛\nOTO",
+              "basis": "خونریزی؛ حساسیت سیستم\nتنفسی",
+              "verified": true,
+              "verification_source": "pdf_word_grid_recovery"
+            },
+            {
+              "row_number": "14",
+              "chemical": "آکرولئین\n[107-02-8] Acrolein",
+              "cas": [
+                "107-02-8"
+              ],
+              "molecular_weight": "06 / 56",
+              "STEL/C": "ppm C\n05 /0",
+              "TWA": null,
+              "symbols": "پوست؛ A3",
+              "basis": "سوزش چشم",
+              "verified": true,
+              "verification_source": "pdf_word_grid_recovery"
+            }
+          ]
+        }
+      ],
+      "row_count": 8
+    },
+    "48": {
+      "page_number": 48,
+      "tables": [
+        {
+          "table_index": 0,
+          "rows": [
+            {
+              "row_number": "15",
+              "chemical": "آکریل آمید\n[79-06-1] Acrylamide",
+              "cas": [
+                "79-06-1"
+              ],
+              "molecular_weight": "08 / 71",
+              "STEL/C": null,
+              "TWA": "mg/m3(IFV)\n0/03",
+              "symbols": "پوست؛ A2 ؛\nDSEN ؛ BEI",
+              "basis": "اختالل سیستم اعصاب مرکزی و\nمحیطی ؛ سرطانزا",
+              "verified": true,
+              "verification_source": "pdf_word_grid_recovery"
+            },
+            {
+              "row_number": "16",
+              "chemical": "اسید آکریلیک\n[79-10-7] acid Acrylic",
+              "cas": [
+                "79-10-7"
+              ],
+              "molecular_weight": "06 / 72",
+              "STEL/C": null,
+              "TWA": "ppm\n2",
+              "symbols": "A4\nپوست؛",
+              "basis": "تحریک قسمت فوقانی دستگاه\nتنفسی",
+              "verified": true,
+              "verification_source": "pdf_word_grid_recovery"
+            },
+            {
+              "row_number": "17",
+              "chemical": "پلیمر آکریلیک اسید\npolymer acid Acrylic",
+              "cas": [],
+              "molecular_weight": null,
+              "STEL/C": "05 /0\n(R) ³ mg/m",
+              "TWA": "(R) ³ mg/m\n05 /0",
+              "symbols": "A4",
+              "basis": null,
+              "verified": true,
+              "verification_source": "pdf_word_grid_recovery"
+            },
+            {
+              "row_number": "18",
+              "chemical": "آکریلونیتریل\n[107-13-1] Acrylonitrile",
+              "cas": [
+                "107-13-1"
+              ],
+              "molecular_weight": "05 / 53",
+              "STEL/C": null,
+              "TWA": "ppm\n2",
+              "symbols": "A3\nپوست؛",
+              "basis": "اختالل سیستم اعصاب مرکزی؛\nتحریک قسمت تحتانی دستگاه\nتنفسی",
+              "verified": true,
+              "verification_source": "pdf_word_grid_recovery"
+            },
+            {
+              "row_number": "19",
+              "chemical": "اسید آدیپیک\n[124-04-9] acid Adipic",
+              "cas": [
+                "124-04-9"
+              ],
+              "molecular_weight": "14 / 146",
+              "STEL/C": null,
+              "TWA": "3\nmg/m\n5",
+              "symbols": null,
+              "basis": "تحریک قسمت فوقانی دستگاه\nتنفسی؛ چشم و پوست ؛اختالل\nسیستم اعصاب خودکار",
+              "verified": true,
+              "verification_source": "pdf_word_grid_recovery"
+            },
+            {
+              "row_number": "20",
+              "chemical": "آدیپونیتریل\n[111-69-3] Adiponitrile",
+              "cas": [
+                "111-69-3"
+              ],
+              "molecular_weight": "10 / 108",
+              "STEL/C": null,
+              "TWA": "ppm\n2",
+              "symbols": "پوست",
+              "basis": "تحریک قسمت فوقانی و تحتانی\nدستگاه تنفسی",
+              "verified": true,
+              "verification_source": "pdf_word_grid_recovery"
+            },
+            {
+              "row_number": "21",
+              "chemical": "آفالتوکسین ها\n[1402-68-2] Aflatoxines",
+              "cas": [
+                "1402-68-2"
+              ],
+              "molecular_weight": null,
+              "STEL/C": null,
+              "TWA": "mg/m³ 0000051 /0",
+              "symbols": "A1",
+              "basis": null,
+              "verified": true,
+              "verification_source": "pdf_word_grid_recovery"
+            },
+            {
+              "row_number": "22",
+              "chemical": "آالکلر\n[15972-60-8] Alachlor",
+              "cas": [
+                "15972-60-8"
+              ],
+              "molecular_weight": "8/ 269",
+              "STEL/C": null,
+              "TWA": "(IFV) 3 mg/m\n1",
+              "symbols": "A3 DSEN\n؛",
+              "basis": "( کبد ،هموسیدروزیس ،طحال\nکلیه )",
+              "verified": true,
+              "verification_source": "pdf_word_grid_recovery"
+            },
+            {
+              "row_number": "23",
+              "chemical": "آلدیکارب\n[116-06-3] Aldicarb",
+              "cas": [
+                "116-06-3"
+              ],
+              "molecular_weight": "26 / 190",
+              "STEL/C": null,
+              "TWA": "0/005\nmg/m3(IFV)",
+              "symbols": "A4\nپوست؛ ؛\nBEIc",
+              "basis": "بازدارنده آنزیم کولین استراز",
+              "verified": true,
+              "verification_source": "pdf_word_grid_recovery"
+            }
+          ]
+        }
+      ],
+      "row_count": 9
+    },
+    "49": {
+      "page_number": 49,
+      "tables": [
+        {
+          "table_index": 0,
+          "rows": [
+            {
+              "row_number": "24",
+              "chemical": "آلدرین\n[309-00-2] Aldrin",
+              "cas": [
+                "309-00-2"
+              ],
+              "molecular_weight": "93 / 364",
+              "STEL/C": null,
+              "TWA": "mg/m3(IFV)\n0/05",
+              "symbols": "پوست؛ A3",
+              "basis": "اختالل سیستم اعصاب\nمرکزی؛آسیب کبدی وکلیوی",
+              "verified": true,
+              "verification_source": "pdf_word_grid_recovery"
+            },
+            {
+              "row_number": "25",
+              "chemical": "آلیل الکل\n[107-18-6] alcohol Allyl",
+              "cas": [
+                "107-18-6"
+              ],
+              "molecular_weight": "08 / 58",
+              "STEL/C": null,
+              "TWA": "ppm\n5/0",
+              "symbols": "A4\nپوست؛",
+              "basis": "تحریک قسمت فوقانی دستگاه\nتنفسی و چشم",
+              "verified": true,
+              "verification_source": "pdf_word_grid_recovery"
+            },
+            {
+              "row_number": "26",
+              "chemical": "آلیل آمین\n[107-11-9] Allylamine",
+              "cas": [
+                "107-11-9"
+              ],
+              "molecular_weight": "09 / 57",
+              "STEL/C": "ppm\n6",
+              "TWA": "ppm\n2",
+              "symbols": "پوست",
+              "basis": null,
+              "verified": true,
+              "verification_source": "pdf_word_grid_recovery"
+            },
+            {
+              "row_number": "27",
+              "chemical": "آلیل برمید\n[106-95-6] bromide Allyl",
+              "cas": [
+                "106-95-6"
+              ],
+              "molecular_weight": "99 / 120",
+              "STEL/C": "pm p\n2/0",
+              "TWA": "ppm\n1/0",
+              "symbols": "A4\nپوست؛",
+              "basis": "تحریک قسمت فوقانی دستگاه\nتنفسی و چشم",
+              "verified": true,
+              "verification_source": "pdf_word_grid_recovery"
+            },
+            {
+              "row_number": "28",
+              "chemical": "آلیل کلرید\n[107-05-1] choloride Allyl",
+              "cas": [
+                "107-05-1"
+              ],
+              "molecular_weight": "50 / 76",
+              "STEL/C": "ppm\n2",
+              "TWA": "ppm\n1",
+              "symbols": "پوست؛ A3",
+              "basis": "تحریک قسمت فوقانی دستگاه\nتنفسی و چشم ؛ آسیب های\nکبدی و کلیوی",
+              "verified": true,
+              "verification_source": "pdf_word_grid_recovery"
+            },
+            {
+              "row_number": "29",
+              "chemical": "آلیل گلیسیدیل اتر\n[106-92-3] Ether glycidyl Allyl",
+              "cas": [
+                "106-92-3"
+              ],
+              "molecular_weight": "14 / 114",
+              "STEL/C": null,
+              "TWA": "ppm\n1",
+              "symbols": "A4",
+              "basis": "تحریک قسمت فوقانی دستگاه\nتنفسی؛ درماتیت سوزش چشم و\nپوست",
+              "verified": true,
+              "verification_source": "pdf_word_grid_recovery"
+            },
+            {
+              "row_number": "30",
+              "chemical": "آلیل مت اکریلیت\n[96-05-9] methacrylate Allyl",
+              "cas": [
+                "96-05-9"
+              ],
+              "molecular_weight": "15 / 126",
+              "STEL/C": null,
+              "TWA": "ppm\n1",
+              "symbols": "پوست",
+              "basis": "آسیب کبدی",
+              "verified": true,
+              "verification_source": "pdf_word_grid_recovery"
+            },
+            {
+              "row_number": "31",
+              "chemical": "آلیل پروپیل دی سولفید\n[2179-59-1] disulfide propyl Allyl",
+              "cas": [
+                "2179-59-1"
+              ],
+              "molecular_weight": "16 / 148",
+              "STEL/C": null,
+              "TWA": "ppm\n5/0",
+              "symbols": "DSEN",
+              "basis": "تحریک قسمت فوقانی دستگاه\nتنفسی و چشم",
+              "verified": true,
+              "verification_source": "pdf_word_grid_recovery"
+            }
+          ]
+        }
+      ],
+      "row_count": 8
+    },
+    "50": {
+      "page_number": 50,
+      "tables": [
+        {
+          "table_index": 0,
+          "rows": [
+            {
+              "row_number": "32",
+              "chemical": "فلز آلومینیوم و ترکیبات نامحلول آن\nand [7429-90-5] metal Aluminum\ncompounds insoluble",
+              "cas": [
+                "7429-90-5"
+              ],
+              "molecular_weight": "98 / 26\nمتفاوت",
+              "STEL/C": null,
+              "TWA": "(R) 3 mg/m\n1",
+              "symbols": "A4",
+              "basis": "پنوموکونیوزیس؛ تحریک\nقسمت تحتانی دستگاه تنفسی؛\nسمیت عصبی",
+              "verified": true,
+              "verification_source": "pdf_word_grid_recovery"
+            },
+            {
+              "row_number": "33",
+              "chemical": "فیبرهای سیلیکات آلومینیوم\n[142844-00-6] fibres Aluminosilicate",
+              "cas": [
+                "142844-00-6"
+              ],
+              "molecular_weight": null,
+              "STEL/C": "f/ml\n8/0",
+              "TWA": "f/ml\n1/0",
+              "symbols": null,
+              "basis": null,
+              "verified": true,
+              "verification_source": "pdf_word_grid_recovery"
+            },
+            {
+              "row_number": "34",
+              "chemical": "2 - آمینو بوتانول\n[96-20-8] 2-Aminobutanol",
+              "cas": [
+                "96-20-8"
+              ],
+              "molecular_weight": "4 1/ 89",
+              "STEL/C": "ppm\n2",
+              "TWA": "ppm\n1",
+              "symbols": "پوست",
+              "basis": null,
+              "verified": true,
+              "verification_source": "pdf_word_grid_recovery"
+            },
+            {
+              "row_number": "35",
+              "chemical": "4 - آمینو دی فنیل\n[92-67-1] diphenyl 4-Amino",
+              "cas": [
+                "92-67-1"
+              ],
+              "molecular_weight": "24 / 169",
+              "STEL/C": null,
+              "TWA": "ppm 001 /0",
+              "symbols": "پوست؛ A1",
+              "basis": "سرطان کبد و مثانه",
+              "verified": true,
+              "verification_source": "pdf_word_grid_recovery"
+            },
+            {
+              "row_number": "36",
+              "chemical": "2 - آمینو نفتالن - 1 - سولفونیک اسید\nacid 2-Aminonaphthalene-1-sulfonic\n[81-16-3]",
+              "cas": [
+                "81-16-3"
+              ],
+              "molecular_weight": "25 / 223",
+              "STEL/C": "(I) ³ mg/m\n24",
+              "TWA": "(I) ³ mg/m\n6",
+              "symbols": null,
+              "basis": null,
+              "verified": true,
+              "verification_source": "pdf_word_grid_recovery"
+            },
+            {
+              "row_number": "37",
+              "chemical": "آمینوفنازون\n[58-15-1] Aminophenazone",
+              "cas": [
+                "58-15-1"
+              ],
+              "molecular_weight": "29 / 231",
+              "STEL/C": null,
+              "TWA": "³ mg/m\n5/0",
+              "symbols": null,
+              "basis": null,
+              "verified": true,
+              "verification_source": "pdf_word_grid_recovery"
+            },
+            {
+              "row_number": "38",
+              "chemical": "3 - آمینو فنول\n[591-27-5] 3-Aminophenol",
+              "cas": [
+                "591-27-5"
+              ],
+              "molecular_weight": "13 / 109",
+              "STEL/C": null,
+              "TWA": "³ mg/m\n1",
+              "symbols": null,
+              "basis": null,
+              "verified": true,
+              "verification_source": "pdf_word_grid_recovery"
+            },
+            {
+              "row_number": "39",
+              "chemical": "4 - آمینو فنول\n[123-30-8] 4-Aminophenol",
+              "cas": [
+                "123-30-8"
+              ],
+              "molecular_weight": "3 1/ 109",
+              "STEL/C": null,
+              "TWA": "³ mg/m\n1",
+              "symbols": null,
+              "basis": null,
+              "verified": true,
+              "verification_source": "pdf_word_grid_recovery"
+            }
+          ]
+        }
+      ],
+      "row_count": 8
+    },
+    "51": {
+      "page_number": 51,
+      "tables": [
+        {
+          "table_index": 0,
+          "rows": [
+            {
+              "row_number": "40",
+              "chemical": "2 - آمینو پریدین\n[504-29-0] 2-Aminopyridine",
+              "cas": [
+                "504-29-0"
+              ],
+              "molecular_weight": "12 / 94",
+              "STEL/C": null,
+              "TWA": "ppm\n5/0",
+              "symbols": null,
+              "basis": "سردرد؛ تهوع؛ اختالل سیستم\nاعصاب مرکزی؛ سرگیجه",
+              "verified": true,
+              "verification_source": "pdf_word_grid_recovery"
+            },
+            {
+              "row_number": "41",
+              "chemical": "آمیترول\n[61-82-5] Amitrol",
+              "cas": [
+                "61-82-5"
+              ],
+              "molecular_weight": "08 / 84",
+              "STEL/C": null,
+              "TWA": "3 mg/m\n2/0",
+              "symbols": "A3",
+              "basis": "اثرات تیروئیدی",
+              "verified": true,
+              "verification_source": "pdf_word_grid_recovery"
+            },
+            {
+              "row_number": "42",
+              "chemical": "آمونیاک\n[7664-41-7] Ammonia",
+              "cas": [
+                "7664-41-7"
+              ],
+              "molecular_weight": "03 / 17",
+              "STEL/C": "ppm 35",
+              "TWA": "ppm 25",
+              "symbols": null,
+              "basis": "آسیب چشم؛ تحریک قسمت\nفوقانی دستگاه تنفسی",
+              "verified": true,
+              "verification_source": "pdf_word_grid_recovery"
+            },
+            {
+              "row_number": "43",
+              "chemical": "دمه کلرید آمونیوم\n[12125-02-9] fume chloride Ammonium",
+              "cas": [
+                "12125-02-9"
+              ],
+              "molecular_weight": "50 / 53",
+              "STEL/C": "3\nmg/m\n20",
+              "TWA": "3\nmg/m\n10",
+              "symbols": null,
+              "basis": "تحریک قسمت فوقانی دستگاه\nتنفس و چشم",
+              "verified": true,
+              "verification_source": "pdf_word_grid_recovery"
+            },
+            {
+              "row_number": "44",
+              "chemical": "آمونیوم دی کرمات ( به عنوان کروم )\n[7789-09-5] dichromate Ammonium",
+              "cas": [
+                "7789-09-5"
+              ],
+              "molecular_weight": "07 / 252",
+              "STEL/C": "08 /0\n3(I) mg/m",
+              "TWA": "(I) 3\nmg/m\n02 /0",
+              "symbols": null,
+              "basis": null,
+              "verified": true,
+              "verification_source": "pdf_word_grid_recovery"
+            },
+            {
+              "row_number": "45",
+              "chemical": "آمونیوم هگزا فلوئورو سیلیکات\nhexafluorosilicate Ammonium\n[16919-19-0]",
+              "cas": [
+                "16919-19-0"
+              ],
+              "molecular_weight": "15 /8 17",
+              "STEL/C": null,
+              "TWA": "³ mg/m\n2/0",
+              "symbols": null,
+              "basis": null,
+              "verified": true,
+              "verification_source": "pdf_word_grid_recovery"
+            },
+            {
+              "row_number": "46",
+              "chemical": "پرفلورو اکتانوات آمونیوم\nPerfluorooctanoate Ammonium\n[3825-26-1]",
+              "cas": [
+                "3825-26-1"
+              ],
+              "molecular_weight": "10 / 431",
+              "STEL/C": null,
+              "TWA": "3 mg/m\n01 /0",
+              "symbols": "A3\nپوست؛",
+              "basis": "آسیب کبدی",
+              "verified": true,
+              "verification_source": "pdf_word_grid_recovery"
+            },
+            {
+              "row_number": "47",
+              "chemical": "سولفامات آمونی وم\n[7773-06-0] sulfamate Ammonium",
+              "cas": [
+                "7773-06-0"
+              ],
+              "molecular_weight": "13 / 114",
+              "STEL/C": null,
+              "TWA": "3 mg/m\n10",
+              "symbols": null,
+              "basis": null,
+              "verified": true,
+              "verification_source": "pdf_word_grid_recovery"
+            },
+            {
+              "row_number": "48",
+              "chemical": "آمپی سیلین\n[69-53-4] Ampicillin",
+              "cas": [
+                "69-53-4"
+              ],
+              "molecular_weight": "40 / 349",
+              "STEL/C": null,
+              "TWA": "³ mg/m\n1/0",
+              "symbols": "A4",
+              "basis": null,
+              "verified": true,
+              "verification_source": "pdf_word_grid_recovery"
+            }
+          ]
+        }
+      ],
+      "row_count": 9
+    },
+    "52": {
+      "page_number": 52,
+      "tables": [
+        {
+          "table_index": 0,
+          "rows": [
+            {
+              "row_number": "49",
+              "chemical": "ترت - آمیل متیل اتر\n(TAME) Ether methyl tert-Amyl\n[994-05-8]",
+              "cas": [
+                "994-05-8"
+              ],
+              "molecular_weight": "2/ 102",
+              "STEL/C": null,
+              "TWA": "ppm\n20",
+              "symbols": null,
+              "basis": "اختالل سیستم اعصاب مرکزی؛\nآسیب جنینی",
+              "verified": true,
+              "verification_source": "pdf_word_grid_recovery"
+            },
+            {
+              "row_number": "50",
+              "chemical": "آنالگین\n[68-89-3] Analgine",
+              "cas": [
+                "68-89-3"
+              ],
+              "molecular_weight": "4/ 351",
+              "STEL/C": null,
+              "TWA": "³ mg/m\n5/0",
+              "symbols": null,
+              "basis": null,
+              "verified": true,
+              "verification_source": "pdf_word_grid_recovery"
+            },
+            {
+              "row_number": "51",
+              "chemical": "آنیلین\n[62-53-3] Aniline",
+              "cas": [
+                "62-53-3"
+              ],
+              "molecular_weight": "13 / 93",
+              "STEL/C": null,
+              "TWA": "ppm\n2",
+              "symbols": "BEI ؛ پوست؛\nA3",
+              "basis": "مت هموگلوبینی",
+              "verified": true,
+              "verification_source": "pdf_word_grid_recovery"
+            },
+            {
+              "row_number": "52",
+              "chemical": "ایزومرهای اورتو\n[90-04-0] isomer ortho",
+              "cas": [
+                "90-04-0"
+              ],
+              "molecular_weight": "15 / 123",
+              "STEL/C": null,
+              "TWA": "3\nmg/m\n5/0",
+              "symbols": "پوست؛ ؛\nBEI\nM\nA4",
+              "basis": "مت هموگلوبینی",
+              "verified": true,
+              "verification_source": "pdf_word_grid_recovery"
+            },
+            {
+              "row_number": null,
+              "chemical": "ایزومرهای پارا\n[104-94-9] isomer para",
+              "cas": [
+                "104-94-9"
+              ],
+              "molecular_weight": "15 / 123",
+              "STEL/C": null,
+              "TWA": "3 mg/m\n5/0",
+              "symbols": "پوست؛ ؛\nBEI\nM",
+              "basis": "مت هموگلوبینی",
+              "verified": true,
+              "verification_source": "pdf_word_grid_recovery"
+            },
+            {
+              "row_number": "53",
+              "chemical": "آنتیمو ا ن و ترکیبات آن\nas compounds, and [7440-36-0] Antimony\nSb",
+              "cas": [
+                "7440-36-0"
+              ],
+              "molecular_weight": "75 / 121",
+              "STEL/C": null,
+              "TWA": "3 mg/m\n5/0",
+              "symbols": null,
+              "basis": "تحریک قسمت فوقانی دستگاه\nتنفسی و پوست",
+              "verified": true,
+              "verification_source": "pdf_word_grid_recovery"
+            },
+            {
+              "row_number": "54",
+              "chemical": "هیدرید آنت ی مو نا\n[7803-52-3] hydride Antimony",
+              "cas": [
+                "7803-52-3"
+              ],
+              "molecular_weight": "78 / 124",
+              "STEL/C": null,
+              "TWA": "ppm\n005 /0",
+              "symbols": null,
+              "basis": "همولیز؛ اثرات هماتولوژیک",
+              "verified": true,
+              "verification_source": "pdf_word_grid_recovery"
+            },
+            {
+              "row_number": "55",
+              "chemical": "تری اکسید آنتیمو ان ‡\n[1309-64-4] trioxide Antimony",
+              "cas": [
+                "1309-64-4"
+              ],
+              "molecular_weight": "5/ 291",
+              "STEL/C": null,
+              "TWA": "(I) 3\nmg/m\n02 /0",
+              "symbols": "A2",
+              "basis": "پنوموکنیوزیس",
+              "verified": true,
+              "verification_source": "pdf_word_grid_recovery"
+            }
+          ]
+        }
+      ],
+      "row_count": 8
+    },
+    "53": {
+      "page_number": 53,
+      "tables": [
+        {
+          "table_index": 0,
+          "rows": [
+            {
+              "row_number": "56",
+              "chemical": "( آلفا ) نفتیل تیوکاربامید ،آنتو؛\n(ANTU) carbamide thio α-Naphthyl\n[86-88-4]",
+              "cas": [
+                "86-88-4"
+              ],
+              "molecular_weight": "27 / 202",
+              "STEL/C": null,
+              "TWA": "3 mg/m\n3/0",
+              "symbols": "A4\nپوست؛",
+              "basis": "اثرات تیروئیدی؛ تهوع",
+              "verified": true,
+              "verification_source": "pdf_word_grid_recovery"
+            },
+            {
+              "row_number": "57",
+              "chemical": "آرگون\n[7440-37-1] Argon",
+              "cas": [
+                "7440-37-1"
+              ],
+              "molecular_weight": "95 / 39",
+              "STEL/C": "ضمیمه و را ببینید : حداقل",
+              "TWA": "D\nخفگی آور ساده ( )",
+              "symbols": "محتوی اکسیژن",
+              "basis": "خفگی",
+              "verified": true,
+              "verification_source": "pdf_word_grid_recovery"
+            },
+            {
+              "row_number": "58",
+              "chemical": "الیاف قابل تنفس پارا آرامید\n[26125-61-1] fibres respirable p-Aramid",
+              "cas": [
+                "26125-61-1"
+              ],
+              "molecular_weight": null,
+              "STEL/C": null,
+              "TWA": "f/ml\n5/0",
+              "symbols": null,
+              "basis": null,
+              "verified": true,
+              "verification_source": "pdf_word_grid_recovery"
+            },
+            {
+              "row_number": "59",
+              "chemical": "آرسنیک و ترکیبات معدنی\ninorganic and [7440-38-2] Arsenic\nAs as compounds,",
+              "cas": [
+                "7440-38-2"
+              ],
+              "molecular_weight": "92 / 74\nمتفاوت",
+              "STEL/C": null,
+              "TWA": "3 mg/m\n01 /0",
+              "symbols": "BEI A1\n؛",
+              "basis": "سرطان ریه",
+              "verified": true,
+              "verification_source": "pdf_word_grid_recovery"
+            },
+            {
+              "row_number": "60",
+              "chemical": "آرسین\n[7784-42-1] Arsine",
+              "cas": [
+                "7784-42-1"
+              ],
+              "molecular_weight": "95 / 77",
+              "STEL/C": null,
+              "TWA": "ppm\n005 /0",
+              "symbols": null,
+              "basis": "اختالل سیستم اعصاب و عروق\nمحیطی؛ اختالل کلیوی وکبدی",
+              "verified": true,
+              "verification_source": "pdf_word_grid_recovery"
+            },
+            {
+              "row_number": "61",
+              "chemical": "تمام اشکال آزبست\nforms all , [1332-21-4] Asbestos",
+              "cas": [
+                "1332-21-4"
+              ],
+              "molecular_weight": null,
+              "STEL/C": null,
+              "TWA": "(F) f/cc\n1/0",
+              "symbols": "A1",
+              "basis": "پنوموکونیوزیس؛ سرطان ریه؛\nمزوتلیوم",
+              "verified": true,
+              "verification_source": "pdf_word_grid_recovery"
+            },
+            {
+              "row_number": "62",
+              "chemical": "آسپارتیک اسید\n[56-84-8] acid Aspartic",
+              "cas": [
+                "56-84-8"
+              ],
+              "molecular_weight": "11 / 133",
+              "STEL/C": null,
+              "TWA": "³ mg/m\n10",
+              "symbols": null,
+              "basis": null,
+              "verified": true,
+              "verification_source": "pdf_word_grid_recovery"
+            },
+            {
+              "row_number": "63",
+              "chemical": "دمه آسفالت ( قیر ) برحسب آئروسل محلول در بنزن\nas , [8052-42-4] fume (Bitumen) Asphalt\naerosol benzene-soluble",
+              "cas": [
+                "8052-42-4"
+              ],
+              "molecular_weight": null,
+              "STEL/C": null,
+              "TWA": "3\nmg/m\n5/0",
+              "symbols": "BEIp ؛ A4",
+              "basis": "تحریک قسمت فوقانی دستگاه\nتنفسی و چشم",
+              "verified": true,
+              "verification_source": "pdf_word_grid_recovery"
+            },
+            {
+              "row_number": "64",
+              "chemical": "آترازین\n[1912-24-9] Atrazine",
+              "cas": [
+                "1912-24-9"
+              ],
+              "molecular_weight": "69 / 215",
+              "STEL/C": null,
+              "TWA": "(I) 3 mg/m\n2",
+              "symbols": "A3",
+              "basis": "اثر بر سیستم های ،خونساز تولید\nمثل و رشد و نمو",
+              "verified": true,
+              "verification_source": "pdf_word_grid_recovery"
+            }
+          ]
+        }
+      ],
+      "row_count": 9
+    },
+    "54": {
+      "page_number": 54,
+      "tables": [
+        {
+          "table_index": 0,
+          "rows": [
+            {
+              "row_number": "65",
+              "chemical": "اورامین\n[492-80-8] Auramine",
+              "cas": [
+                "492-80-8"
+              ],
+              "molecular_weight": "37 / 267",
+              "STEL/C": "(I)\n³ g/m\n32 /0",
+              "TWA": "(I)\n³ mg/m\n08 /0",
+              "symbols": "A3 ؛ پوست",
+              "basis": null,
+              "verified": true,
+              "verification_source": "pdf_word_grid_recovery"
+            },
+            {
+              "row_number": "66",
+              "chemical": "متیل آزینفوس\n[86-50-0] Azinphos-methyl",
+              "cas": [
+                "86-50-0"
+              ],
+              "molecular_weight": "34 / 317",
+              "STEL/C": null,
+              "TWA": "(IFV) 3\nmg/m\n2/0",
+              "symbols": "پوست؛ DSEN\nCI BE ؛ 4 A",
+              "basis": "بازدارنده آنزیم کولین استراز",
+              "verified": true,
+              "verification_source": "pdf_word_grid_recovery"
+            },
+            {
+              "row_number": "67",
+              "chemical": "آزو دی کربن آمید\n[123-77-3] Azodicarbonamide",
+              "cas": [
+                "123-77-3"
+              ],
+              "molecular_weight": "08 / 116",
+              "STEL/C": "3\nmg/m\n3",
+              "TWA": "3\nmg/m\n1",
+              "symbols": null,
+              "basis": "حساسیت",
+              "verified": true,
+              "verification_source": "pdf_word_grid_recovery"
+            },
+            {
+              "row_number": "68",
+              "chemical": "باریم و ترکیبات محلول آن\nsoluble and [7440-39-3] Barium\nBa as compounds,",
+              "cas": [
+                "7440-39-3"
+              ],
+              "molecular_weight": "30 / 137",
+              "STEL/C": null,
+              "TWA": "3 mg/m\n5/0",
+              "symbols": "A4",
+              "basis": "سوزش پوست؛ چشم و دستگاه\nگوارش؛ تونوس عضالت",
+              "verified": true,
+              "verification_source": "pdf_word_grid_recovery"
+            },
+            {
+              "row_number": "69",
+              "chemical": "سولفات باریم\n[7727-43-7] sulfate Barium",
+              "cas": [
+                "7727-43-7"
+              ],
+              "molecular_weight": "43 / 233",
+              "STEL/C": null,
+              "TWA": "(I)(E) 3 mg/m\n5",
+              "symbols": null,
+              "basis": "پنوموکونیوزیس",
+              "verified": true,
+              "verification_source": "pdf_word_grid_recovery"
+            },
+            {
+              "row_number": "70",
+              "chemical": "بندیوکارب\n[22781-23-3] Bendiocarb",
+              "cas": [
+                "22781-23-3"
+              ],
+              "molecular_weight": "20 / 223",
+              "STEL/C": null,
+              "TWA": "(IFV) 3 mg/m\n1/0",
+              "symbols": "A4\nپوست؛\nCI BE",
+              "basis": "بازدارنده آنزیم کولین استراز",
+              "verified": true,
+              "verification_source": "pdf_word_grid_recovery"
+            },
+            {
+              "row_number": "71",
+              "chemical": "بنومیل\n[17804-35-2] Benomyl",
+              "cas": [
+                "17804-35-2"
+              ],
+              "molecular_weight": "32 / 290",
+              "STEL/C": null,
+              "TWA": "(I) 3\nmg/m\n1",
+              "symbols": "DSEN ؛ A3",
+              "basis": "سوزش قسمت فوقانی دستگاه\nتنفسی؛ آسیب به بیضه و دستگاه\nتولید مثل مردان؛ آسیب جنینی",
+              "verified": true,
+              "verification_source": "pdf_word_grid_recovery"
+            },
+            {
+              "row_number": "72",
+              "chemical": "غبار بنتونیت\ndust [1302-78-9] Bentonite\n[85049-30-5] bentonite Sodium",
+              "cas": [
+                "1302-78-9",
+                "85049-30-5"
+              ],
+              "molecular_weight": "31 / 360",
+              "STEL/C": null,
+              "TWA": "³ mg/m\n6",
+              "symbols": null,
+              "basis": null,
+              "verified": true,
+              "verification_source": "pdf_word_grid_recovery"
+            }
+          ]
+        }
+      ],
+      "row_count": 8
+    },
+    "55": {
+      "page_number": 55,
+      "tables": [
+        {
+          "table_index": 0,
+          "rows": [
+            {
+              "row_number": "73",
+              "chemical": "بنزالدهید\n[100-52-7] Benzaldehyde",
+              "cas": [
+                "100-52-7"
+              ],
+              "molecular_weight": "12 / 106",
+              "STEL/C": "³ mg/m\n20",
+              "TWA": "³ mg/m\n5",
+              "symbols": null,
+              "basis": null,
+              "verified": true,
+              "verification_source": "pdf_word_grid_recovery"
+            },
+            {
+              "row_number": "74",
+              "chemical": "بنزو ( آلفا ) آنتراسن\n[56-55-3] Benz[α]anthrancene",
+              "cas": [
+                "56-55-3"
+              ],
+              "molecular_weight": "30 / 228",
+              "STEL/C": null,
+              "TWA": "³ mg/m\n1/0",
+              "symbols": "BEIp A2\n؛",
+              "basis": "سرطان پوست",
+              "verified": true,
+              "verification_source": "pdf_word_grid_recovery"
+            },
+            {
+              "row_number": "75",
+              "chemical": "بنسولید\n[741-58-2] Bensulide",
+              "cas": [
+                "741-58-2"
+              ],
+              "molecular_weight": "5/ 397",
+              "STEL/C": null,
+              "TWA": "(IFV) 3 mg/m\n1/0",
+              "symbols": "A4\nCI BE",
+              "basis": "آسیب کبدی ؛ بازدارنده آنزیم\nکولین استراز",
+              "verified": true,
+              "verification_source": "pdf_word_grid_recovery"
+            },
+            {
+              "row_number": "76",
+              "chemical": "بنزن\n[71-43-2] Benzene",
+              "cas": [
+                "71-43-2"
+              ],
+              "molecular_weight": "11 / 78",
+              "STEL/C": null,
+              "TWA": "ppm\n2/0",
+              "symbols": "BEI\n؛ پوست؛\nA1",
+              "basis": "سندرم میلودیسپالستیک،سرطان\nخون،اثرات ،هماتولوژیک اثرات\nکروموزومی",
+              "verified": true,
+              "verification_source": "pdf_word_grid_recovery"
+            },
+            {
+              "row_number": "77",
+              "chemical": "بنزیدین\n[92-87-5] Benzidine",
+              "cas": [
+                "92-87-5"
+              ],
+              "molecular_weight": "23 / 184",
+              "STEL/C": null,
+              "TWA": "ppm\n001 /0",
+              "symbols": "A1\nپوست؛",
+              "basis": "سرطان مثانه",
+              "verified": true,
+              "verification_source": "pdf_word_grid_recovery"
+            },
+            {
+              "row_number": "78",
+              "chemical": "بنزو ( بتا ) فلورانتن\n[205-99-2] Benzo[b]fluoroanthene",
+              "cas": [
+                "205-99-2"
+              ],
+              "molecular_weight": "30 / 252",
+              "STEL/C": null,
+              "TWA": "ALARA",
+              "symbols": "BEIp ؛ A2",
+              "basis": "سرطان",
+              "verified": true,
+              "verification_source": "pdf_word_grid_recovery"
+            },
+            {
+              "row_number": "79",
+              "chemical": "بنزو ( آلفا ) پیرن\n[50-32-8] Bebzo[a]pyrene",
+              "cas": [
+                "50-32-8"
+              ],
+              "molecular_weight": "30 / 252",
+              "STEL/C": "³ mg/m\n02 /0",
+              "TWA": "³ mg/m\n005 /0",
+              "symbols": "BEIp A2\n؛",
+              "basis": "سرطان",
+              "verified": true,
+              "verification_source": "pdf_word_grid_recovery"
+            }
+          ]
+        }
+      ],
+      "row_count": 7
+    }
+  }
+}

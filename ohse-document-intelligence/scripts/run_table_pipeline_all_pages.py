@@ -4,6 +4,7 @@ Uses table diagnostics from `scripts/table_diagnose.py`:
   Document AI evidence → structural resolver → canonical grid → gold candidates
 
 Does NOT promote to gold/tables or refresh HITL.
+run_table_pipeline_all_pages.py
 """
 
 from __future__ import annotations

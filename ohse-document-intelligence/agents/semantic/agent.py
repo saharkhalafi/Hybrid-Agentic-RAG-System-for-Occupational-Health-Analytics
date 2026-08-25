@@ -9,6 +9,13 @@ from sqlalchemy.orm import Session
 
 from retrieval.pipeline import ProductionRetrievalPipeline, RetrievalConfig, RetrievalMode
 
+# Production default: simpler path wins when offline benchmarks are statistically tied (see closure report).
+DEFAULT_RETRIEVAL_MODE = RetrievalMode.VECTOR_METADATA
+# A/B canary experimental arm only — not the production default until canary confirms significance.
+CANARY_EXPERIMENTAL_MODE = RetrievalMode.HYBRID_RERANK
+# Fallback for the HYBRID canary arm when primary errors or returns empty with page_hint.
+HYBRID_CANARY_FALLBACK_MODE = RetrievalMode.VECTOR_METADATA
+
 
 @dataclass
 class SemanticAgentResult:
@@ -38,12 +45,14 @@ class SemanticAgent:
         session: Session | None = None,
         *,
         top_k: int = 5,
-        retrieval_mode: RetrievalMode = RetrievalMode.HYBRID_RERANK,
+        retrieval_mode: RetrievalMode = DEFAULT_RETRIEVAL_MODE,
+        fallback_mode: RetrievalMode | None = None,
         use_isolated_session: bool = True,
     ) -> None:
         self._parent_session = session
         self.top_k = top_k
         self.retrieval_mode = retrieval_mode
+        self.fallback_mode = fallback_mode
         self.use_isolated_session = use_isolated_session
         if session is not None and not use_isolated_session:
             self.pipeline = ProductionRetrievalPipeline(
@@ -63,8 +72,7 @@ class SemanticAgent:
             if self.use_isolated_session:
                 return self._execute_isolated(query, page_hint=page_hint)
             assert self.pipeline is not None
-            result = self.pipeline.retrieve(query, page_hint=page_hint)
-            return self._to_result(result)
+            return self._retrieve_with_fallback(self.pipeline, query, page_hint=page_hint)
         except Exception as exc:
             return SemanticAgentResult(success=False, error=str(exc))
 
@@ -84,10 +92,72 @@ class SemanticAgent:
                     reranker=None,
                 ),
             )
-            result = pipeline.retrieve(query, page_hint=page_hint, query_vector=query_vector)
-            return self._to_result(result)
+            return self._retrieve_with_fallback(
+                pipeline,
+                query,
+                page_hint=page_hint,
+                query_vector=query_vector,
+            )
         finally:
             db.close()
+
+    def _retrieve_with_fallback(
+        self,
+        pipeline: ProductionRetrievalPipeline,
+        query: str,
+        *,
+        page_hint: int | None = None,
+        query_vector: list[float] | None = None,
+    ) -> SemanticAgentResult:
+        """Optional fallback when primary mode errors or returns empty with page_hint.
+
+        Production default (VECTOR_METADATA) does not enable fallback. HYBRID_RERANK
+        canary arm may set fallback_mode=VECTOR_METADATA explicitly.
+        """
+        if self.fallback_mode is None or self.fallback_mode == self.retrieval_mode:
+            result = pipeline.retrieve(query, page_hint=page_hint, query_vector=query_vector)
+            return self._to_result(result)
+
+        fallback_reason: str | None = None
+        try:
+            result = pipeline.retrieve(query, page_hint=page_hint, query_vector=query_vector)
+        except Exception as exc:
+            if self.retrieval_mode == self.fallback_mode:
+                raise
+            fallback_reason = f"primary_error:{type(exc).__name__}"
+            result = None
+        else:
+            if (
+                not result.chunks
+                and page_hint is not None
+                and self.retrieval_mode != self.fallback_mode
+            ):
+                fallback_reason = "empty_with_page_hint"
+
+        if fallback_reason:
+            fallback_pipeline = ProductionRetrievalPipeline(
+                pipeline.session,
+                config=RetrievalConfig(
+                    mode=self.fallback_mode,
+                    final_k=self.top_k,
+                    candidate_k=30,
+                    reranker=None,
+                ),
+            )
+            result = fallback_pipeline.retrieve(
+                query,
+                page_hint=page_hint,
+                query_vector=query_vector,
+            )
+            agent_result = self._to_result(result)
+            agent_result.retrieval_trace = [
+                f"fallback:{fallback_reason}",
+                f"fallback_mode:{self.fallback_mode.value}",
+                *agent_result.retrieval_trace,
+            ]
+            return agent_result
+
+        return self._to_result(result)
 
     @staticmethod
     def _to_result(result) -> SemanticAgentResult:

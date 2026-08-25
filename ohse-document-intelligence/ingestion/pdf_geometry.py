@@ -325,42 +325,33 @@ class PageGeometryIndex:
                 if not norm:
                     continue
 
-                y0 = float(bbox[1])
-                y1 = float(bbox[3])
+                x0, y0, x1, y1 = map(float, bbox)
 
-                y_key = round(y0 / 2) * 2
+                line_center_y = (y0 + y1) / 2.0
 
-                line_words = tuple(
-                    word
-                    for word in self.words
-                    if (
-                        abs(word.y0 - y0) <= 4
-                        or abs(word.y1 - y1) <= 4
-                        or (
-                            word.y0 <= y1
-                            and word.y1 >= y0
-                        )
-                    )
-                )
-
+                # Only attach words whose vertical center belongs
+                # to this actual PDF line.
                 line_words = tuple(
                     sorted(
-                        line_words,
+                        (
+                            word
+                            for word in self.words
+                            if (
+                                y0 - 2.0
+                                <= (word.y0 + word.y1) / 2.0
+                                <= y1 + 2.0
+                            )
+                        ),
                         key=lambda word: word.x0,
                     )
                 )
 
                 lines.append(
                     PdfLine(
-                        y_key=y_key,
+                        y_key=round(line_center_y / 2) * 2,
                         text=text,
                         norm=norm,
-                        bbox=(
-                            float(bbox[0]),
-                            float(bbox[1]),
-                            float(bbox[2]),
-                            float(bbox[3]),
-                        ),
+                        bbox=(x0, y0, x1, y1),
                         words=line_words,
                     )
                 )

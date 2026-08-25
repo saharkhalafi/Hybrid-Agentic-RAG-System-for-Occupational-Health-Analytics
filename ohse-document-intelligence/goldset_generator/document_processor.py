@@ -1,4 +1,4 @@
-"""Layer 1 evidence extraction — Document AI Layout Parser only."""
+﻿"""Layer 1 evidence extraction ΓÇö Document AI Layout Parser only."""
 
 from __future__ import annotations
 
@@ -163,7 +163,7 @@ def _find_cached_document_ai_raw(base_hash: str, start_page: int, end_page: int)
 
 
 class DocumentProcessor:
-    """Layer 1 — extract immutable evidence from Document AI Layout Parser."""
+    """Layer 1 ΓÇö extract immutable evidence from Document AI Layout Parser."""
 
     def __init__(self) -> None:
         self.settings = get_settings()
@@ -234,7 +234,7 @@ class DocumentProcessor:
         parsed: DocumentAIExtractionResult,
         table_classifier,
     ) -> tuple[list[ExtractedTableRecord], list[ExtractedCellRecord]]:
-        """Build Layer 1 evidence cells from Document AI — no geometry alignment."""
+        """Build Layer 1 evidence cells from Document AI ΓÇö no geometry alignment."""
         tables: list[ExtractedTableRecord] = []
         all_cells: list[ExtractedCellRecord] = []
         table_index_by_page: dict[int, int] = {}

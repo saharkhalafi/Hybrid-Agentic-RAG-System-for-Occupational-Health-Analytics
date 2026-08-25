@@ -241,9 +241,25 @@ class QueryOrchestrator:
             agent_results=agent_results,
         )
         trace.guardrail_decision = guard.action
+        trace.no_data_reason = guard.no_data_reason
         trace.validation_result = "pass" if guard.allowed else guard.action
         if guard.action != "pass":
             self.metrics.inc(f"guardrail_{guard.action}")
+
+        if guard.action == "no_data" and guard.no_data_reason:
+            from agents.structured.no_data_reason import NoDataReason
+            from observability.no_data_events import record_no_data_event
+
+            if guard.no_data_reason == NoDataReason.PENDING_PROMOTION.value:
+                record_no_data_event(
+                    self.session,
+                    reason=NoDataReason.PENDING_PROMOTION,
+                    query=ctx.resolved_query,
+                    trace_id=trace.trace_id,
+                    chemical_id=slots.get("chemical_id"),
+                    cas=slots.get("cas"),
+                    intent=classification.intent,
+                )
 
         answer, citations = self.synthesizer.synthesize(
             intent=classification.intent,
@@ -300,7 +316,11 @@ class QueryOrchestrator:
             session_id=session_id,
             requires_clarification=classification.requires_clarification or guard.action == "clarify",
             gate_decision=gate_decision,
-            metadata={"trace": trace.to_dict(), "cost": cost.to_dict()},
+            metadata={
+                "trace": trace.to_dict(),
+                "cost": cost.to_dict(),
+                "no_data_reason": guard.no_data_reason,
+            },
         )
 
     def _gate_response(

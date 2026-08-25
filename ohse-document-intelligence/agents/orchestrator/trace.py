@@ -25,6 +25,7 @@ class QueryTrace:
     formula_id: str | None = None
     validation_result: str = ""
     guardrail_decision: str = ""
+    no_data_reason: str | None = None
     final_answer: str = ""
     citations: list[dict[str, Any]] = field(default_factory=list)
     context_trace: list[str] = field(default_factory=list)
@@ -48,6 +49,7 @@ class QueryTrace:
             "formula_id": self.formula_id,
             "validation_result": self.validation_result,
             "guardrail_decision": self.guardrail_decision,
+            "no_data_reason": self.no_data_reason,
             "final_answer": self.final_answer,
             "citations": self.citations,
             "context_trace": self.context_trace,

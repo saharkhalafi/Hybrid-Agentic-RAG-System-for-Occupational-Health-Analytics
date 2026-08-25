@@ -5,7 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-# Minimum fused retrieval score before semantic answers are allowed.
+from agents.structured.no_data_reason import NO_DATA_MESSAGE_FA, NoDataReason
+
 SEMANTIC_MIN_SCORE = 0.42
 
 
@@ -15,6 +16,7 @@ class GuardrailDecision:
     action: str  # pass | clarify | refuse | no_data
     message_fa: str | None = None
     reasons: list[str] = field(default_factory=list)
+    no_data_reason: str | None = None
 
 
 class GuardrailGate:
@@ -50,11 +52,20 @@ class GuardrailGate:
         if nlevel >= 2:
             structured = agent_results.get("structured") or agent_results.get("hybrid", {}).get("agent_results", {}).get("structured")
             if isinstance(structured, dict) and not structured.get("success"):
+                reason_raw = structured.get("no_data_reason")
+                try:
+                    reason = NoDataReason(reason_raw) if reason_raw else NoDataReason.UNKNOWN_CHEMICAL
+                except ValueError:
+                    reason = NoDataReason.UNKNOWN_CHEMICAL
                 return GuardrailDecision(
                     allowed=False,
                     action="no_data",
-                    message_fa="اطلاعات کافی برای پاسخ قطعی در داده‌های موجود پیدا نشد.",
-                    reasons=["structured_lookup_failed"],
+                    message_fa=NO_DATA_MESSAGE_FA.get(
+                        reason,
+                        NO_DATA_MESSAGE_FA[NoDataReason.UNKNOWN_CHEMICAL],
+                    ),
+                    reasons=[f"structured_lookup_failed:{reason.value}"],
+                    no_data_reason=reason.value,
                 )
             # forbid semantic-only numeric authority
             if nlevel >= 2 and not structured and agent_results.get("semantic") and not agent_results.get("structured"):

@@ -5,6 +5,8 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from agents.routing.normalizer import strip_limit_type_prefix
+
 CAS_PATTERN = re.compile(r"\b(\d{2,7}-\d{2}-\d)\b")
 FORMULA_ID_PATTERN = re.compile(r"\b(formula_\d+_\d+)\b", re.IGNORECASE)
 CONCENTRATION_PATTERN = re.compile(
@@ -14,7 +16,8 @@ CONCENTRATION_PATTERN = re.compile(
 _ASSIGN = r"(?:=|:|برابر(?:\s*با)?)\s*"
 AHW_PATTERN = re.compile(rf"ahw\s*_?\s*(\d+)\s*{_ASSIGN}(-?\d+(?:\.\d+)?)", re.IGNORECASE)
 T_PATTERN = re.compile(rf"\bt\s*_?\s*(\d+)\s*{_ASSIGN}(-?\d+(?:\.\d+)?)", re.IGNORECASE)
-CHEMICAL_LATIN = re.compile(r"\b([A-Z][a-zA-Z0-9\-()]+(?:\s+[a-zA-Z]+)?)\b")
+CHEMICAL_LATIN = re.compile(r"\b([A-Za-z][a-zA-Z0-9\-()]+(?:\s+[a-zA-Z]+)?)\b")
+NON_CHEMICAL_TOKENS = frozenset({"TWA", "STEL", "CAS", "MW", "BEI", "OEL", "CEILING", "C", "FOR"})
 
 OEL_KEYWORDS = {
     "twa": "TWA",
@@ -79,11 +82,18 @@ def extract_slots(query: str, inherited: dict[str, Any] | None = None) -> dict[s
         slots["variables"] = {**ahw_inputs, **t_inputs}
 
     if "chemical_name" not in slots:
-        chem = CHEMICAL_LATIN.search(q)
+        entity_query = strip_limit_type_prefix(q)
+        chem = CHEMICAL_LATIN.search(entity_query)
         if chem:
             token = chem.group(1)
-            if token.upper() not in {"TWA", "STEL", "CAS", "MW", "BEI", "OEL", "CEILING"}:
+            if token.upper() not in NON_CHEMICAL_TOKENS:
                 slots["chemical_name"] = token
+        if "chemical_name" not in slots:
+            lowered = entity_query.lower()
+            for token in re.findall(r"\b[a-z][a-z0-9\-()]+\b", lowered):
+                if token.upper() not in NON_CHEMICAL_TOKENS and len(token) >= 4:
+                    slots["chemical_name"] = token
+                    break
 
     # Persian common names
     persian_chems = {

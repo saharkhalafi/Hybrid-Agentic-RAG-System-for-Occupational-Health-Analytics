@@ -1,5 +1,5 @@
 """Deterministic chemical entity resolution against PostgreSQL chemical_registry."""
-
+#E:\cursor projects\HSE6 AI Agent\ohse-document-intelligence\agents\routing\chemical_resolver.py
 from __future__ import annotations
 
 import re
@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from agents.routing.chemical_registry_cache import get_accepted_chemicals
 from agents.routing.entity_signals import extract_persian_entity_tokens, query_has_entity_attempt, query_has_explicit_entity_signal
+from agents.routing.normalizer import strip_limit_type_prefix
 from database.models import ChemicalRegistry
 
 # Common leading descriptors in OHE6 English names (reversed in user queries)
@@ -20,11 +21,31 @@ DESCRIPTOR_PREFIXES = frozenset({
     "ether", "ethers", "ester", "esters", "salt", "salts",
 })
 
-CAS_PATTERN = re.compile(r"\b(\d{2,7}-\d{2}-\d)\b")
+# NOTE: tolerates internal spacing around the hyphens (e.g.
+# "100 - 42 - 5" or a pasted "[100-42-5]"), consistent with the
+# CAS_PATTERN used throughout the rest of the pipeline
+# (goldset_generator.structural_resolver, ingestion.merged_row_splitter,
+# document_ai.geometry_resolver, knowledge_pipeline.py). A user query
+# containing a spaced or bracketed CAS must resolve to the same
+# chemical_registry row as the canonical un-spaced form.
+CAS_PATTERN = re.compile(r"\d{2,7}\s*-\s*\d{2}\s*-\s*\d")
 NON_CHEMICAL_TOKENS = frozenset({
     "TWA", "STEL", "CAS", "MW", "BEI", "OEL", "CEILING", "CEILING",
     "PPM", "PPB", "AHV", "A(8)", "VDV", "LAeq",
 })
+
+
+def _normalize_cas_match(value: str) -> str:
+    """
+    Collapse whitespace inside a raw CAS_PATTERN match, e.g.
+    "100 - 42 - 5" -> "100-42-5". Keeps this module's CAS handling
+    consistent with normalize_cas() in
+    goldset_generator.structural_resolver and the CAS_PATTERN used in
+    knowledge_pipeline.py.
+    """
+
+    return re.sub(r"\s+", "", value)
+
 
 # Persian modifier tokens that must align with the English chemical name.
 _PERSIAN_MODIFIERS = {
@@ -286,6 +307,7 @@ class ChemicalResolver:
         *,
         inherited: dict[str, Any] | None = None,
         raw_query: str | None = None,
+        authoritative: bool = False,
     ) -> ChemicalResolution:
         inherited = inherited or {}
         entity_query = (raw_query or query or "").strip()
@@ -305,15 +327,19 @@ class ChemicalResolver:
                 method="inherited",
             )
 
-        q = (query or "").strip()
+        q = strip_limit_type_prefix((query or "").strip())
         if not q:
             return ChemicalResolution(None, None, None, None, 0.0, "empty")
+
+        token_overlap_min = 0.65 if authoritative else 0.5
+        partial_min_len = 5 if authoritative else 3
 
         # 1. CAS exact
         cas_m = CAS_PATTERN.search(q)
         if cas_m:
-            cas = cas_m.group(1)
-            chem = self.session.scalar(select(ChemicalRegistry).where(ChemicalRegistry.cas == cas))
+            cas = _normalize_cas_match(cas_m.group(0))
+            chem = next(
+                (c for c in self._all_chemicals() if c.cas == cas),None,)
             if chem:
                 return ChemicalResolution(
                     str(chem.id), chem.english_name, chem.cas, chem.persian_name,
@@ -324,18 +350,17 @@ class ChemicalResolver:
         candidates_to_try: list[str] = []
         for variant in _reverse_descriptor_phrase(q):
             candidates_to_try.append(variant)
-        # Latin multi-word
-        for m in re.finditer(r"\b([A-Z][a-zA-Z0-9\-()]+(?:\s+[a-zA-Z]+)+)\b", q):
+        for m in re.finditer(r"\b([A-Za-z][a-zA-Z0-9\-()]+(?:\s+[a-zA-Z]+)+)\b", q):
             token = m.group(1)
             if token.upper() not in NON_CHEMICAL_TOKENS:
                 candidates_to_try.append(token)
-        for m in re.finditer(r"\b([A-Z][a-zA-Z0-9\-()]{2,})\b", q):
+        for m in re.finditer(r"\b([A-Za-z][a-zA-Z0-9\-()]{2,})\b", q):
             token = m.group(1)
-            if token.upper() not in NON_CHEMICAL_TOKENS:
+            if token.upper() not in NON_CHEMICAL_TOKENS and len(token) >= partial_min_len:
                 candidates_to_try.append(token)
 
         for name in candidates_to_try:
-            res = self._match_exact(name)
+            res = self._match_exact(name, authoritative=authoritative)
             if res:
                 return res
 
@@ -455,7 +480,7 @@ class ChemicalResolver:
                 if not c_tokens:
                     continue
                 overlap = len(q_tokens & c_tokens) / max(len(q_tokens), 1)
-                if overlap >= 0.5:
+                if overlap >= token_overlap_min:
                     scored.append((overlap, chem, label))
 
         if not scored:
@@ -480,7 +505,7 @@ class ChemicalResolver:
                 ],
             )
 
-        if top_score >= 0.5:
+        if top_score >= token_overlap_min:
             return ChemicalResolution(
                 str(top_chem.id), top_chem.english_name, top_chem.cas, top_chem.persian_name,
                 top_score, f"token_{method}",
@@ -488,30 +513,62 @@ class ChemicalResolver:
 
         return ChemicalResolution(None, None, None, None, top_score, "below_threshold")
 
-    def _match_exact(self, name: str) -> ChemicalResolution | None:
+    def _match_exact(self, name: str, *, authoritative: bool = False) -> ChemicalResolution | None:
         name = name.strip()
         if not name or name.upper() in NON_CHEMICAL_TOKENS:
             return None
-        chem = self.session.scalar(
-            select(ChemicalRegistry).where(
-                or_(
-                    ChemicalRegistry.english_name.ilike(name),
-                    ChemicalRegistry.persian_name.ilike(name),
-                    ChemicalRegistry.cas == name,
-                )
-            )
-        )
-        if chem:
+        chemicals = self._all_chemicals()
+        normalized_name = _normalize_name(name)
+        exact_matches = [
+        chem
+        for chem in chemicals
+        if (
+            _normalize_name(chem.english_name or "") == normalized_name
+            or _normalize_name(chem.persian_name or "") == normalized_name
+            or (chem.cas and chem.cas == name)
+        )]
+        if len(exact_matches) == 1:
+            chem = exact_matches[0]
             return ChemicalResolution(
-                str(chem.id), chem.english_name, chem.cas, chem.persian_name, 1.0, "exact",
-            )
-        # ilike contains — only if unique
-        matches = list(
-            self.session.scalars(
-                select(ChemicalRegistry).where(ChemicalRegistry.english_name.ilike(f"%{name}%")).limit(3)
-            ).all()
+            str(chem.id),
+            chem.english_name,
+            chem.cas,
+            chem.persian_name,
+            1.0,
+            "exact",
         )
-        if len(matches) == 1:
-            c = matches[0]
-            return ChemicalResolution(str(c.id), c.english_name, c.cas, c.persian_name, 0.85, "partial_unique")
+        if len(exact_matches) > 1:
+            return ChemicalResolution(
+            None,
+            None,
+            None,
+            None,
+            0.9,
+            "ambiguous",
+            ambiguous=True,
+            candidates=[
+                {
+                    "name": chem.english_name,
+                    "cas": chem.cas,
+                    "score": 1.0,
+                }
+                for chem in exact_matches[:3]
+            ],
+        )
+        partial_matches = [
+        chem
+        for chem in chemicals
+        if normalized_name in _normalize_name(chem.english_name or "")]
+        if len(partial_matches) == 1:
+            chem = partial_matches[0]
+            if authoritative and len(name) < 5:
+                return None
+
+            return ChemicalResolution(
+            str(chem.id),
+            chem.english_name,
+            chem.cas,
+            chem.persian_name,
+            0.85,
+            "partial_unique",)
         return None
