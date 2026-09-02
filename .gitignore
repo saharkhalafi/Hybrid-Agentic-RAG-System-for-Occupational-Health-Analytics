@@ -428,3 +428,7 @@ ohse-document-intelligence/scripts/validate_local_api.py
 ohse-document-intelligence/persistence/canonical_chunk_store.py
 ohse-document-intelligence/persistence/phase7_chunk_rebuild.py
 ohse-document-intelligence/scripts/run_phase7_chunk_rebuild.py
+*.dump
+
+ohse-document-intelligence/goldset.xlsx
+page51.json

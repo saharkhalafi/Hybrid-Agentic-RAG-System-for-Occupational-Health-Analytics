@@ -430,6 +430,32 @@ def _assign_column(word: WordToken, centroids: list[float], page_width: float) -
     return _assign_column_by_boundary(word.x_center, page_width)
 
 
+def recover_stel_twa_from_words(
+    words: list[WordToken],
+    page_width: float,
+    y_min: float,
+    y_max: float,
+) -> dict[str, str | None]:
+    """Assign STEL/TWA by physical x-band, not Document AI text order.
+
+    Column 2 is STEL/C (left of the pair); column 3 is TWA. Used when DAI
+    cloned one merged-limit bbox onto both logical cells.
+    """
+    buckets: dict[int, list[WordToken]] = {2: [], 3: []}
+    for word in words:
+        if not (y_min <= word.y_center <= y_max):
+            continue
+        if _is_header_word(word):
+            continue
+        col = _assign_column_by_boundary(word.x_center, page_width)
+        if col in buckets:
+            buckets[col].append(word)
+    return {
+        "STEL": _compose_cell_text(buckets[2]) or None,
+        "TWA": _compose_cell_text(buckets[3]) or None,
+    }
+
+
 def _assign_row(
     word: WordToken,
     anchors: list[tuple[float, str]],

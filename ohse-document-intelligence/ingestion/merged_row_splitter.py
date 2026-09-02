@@ -925,6 +925,12 @@ def _is_limit_unit_token(token: str) -> bool:
     )
 
 
+def _is_ocr_unit_fragment(token: str) -> bool:
+    """OCR sometimes splits ppm/ppb into adjacent letters (p+pm, pp+m)."""
+    lowered = str(token or "").lower().replace(" ", "")
+    return lowered in {"p", "pp", "pm", "pb"}
+
+
 def _is_unit_exponent_token(token: str) -> bool:
     text = str(token or "").strip()
     if text == "³":
@@ -1044,28 +1050,41 @@ def _da_limit_text_is_corrupted(text: str) -> bool:
     return "\\cdot" in (text or "") or "\\pi" in (text or "")
 
 
+def _is_leading_zero_mantissa(token: str) -> bool:
+    ascii_token = _ascii_digits(token).strip()
+    return bool(re.fullmatch(r"0\d+", ascii_token))
+
+
 def _numeric_from_fragments(fragments: list[str]) -> str | None:
     toks = [
         _ascii_digits(token).strip()
         for token in fragments
         if str(token).strip()
+        and str(token).strip() not in {"-", "—", "–"}
+        and not _is_limit_unit_token(token)
+        and not _is_unit_exponent_token(token)
+        and not _is_unit_qualifier_token(token)
     ]
     if not toks:
         return None
-    if all(token in {"-", "—", "–"} for token in toks):
-        return None
     if len(toks) == 1:
         token = toks[0]
+        if re.fullmatch(r"\d+\.\d+", token):
+            return token
         if token.isdigit():
             return token
         if "/" in token:
             left, right = token.split("/", 1)
             return parse_slash_decimal(left or "0", right)
         return None
+    if len(toks) == 3 and toks[1] in {"/", "\\"}:
+        return parse_slash_decimal(toks[0] or "0", toks[2] or "0")
     if len(toks) > 2:
         return None
     first, second = toks[0], toks[1]
-    if first.startswith("/") and second.isdigit():
+    if first.startswith("/") and (
+        second.isdigit() or _is_leading_zero_mantissa(second)
+    ):
         left = first[1:] or "0"
         return parse_slash_decimal(left, second)
     if first.isdigit() and second.startswith("/"):
@@ -1098,6 +1117,34 @@ def _unit_from_tokens(tokens: list[str]) -> str:
     return "mg/m"
 
 
+def _merge_ocr_unit_fragments(tokens: list[str]) -> list[str]:
+    merged: list[str] = []
+    index = 0
+    while index < len(tokens):
+        current = tokens[index]
+        lowered = current.lower().replace(" ", "")
+        if index + 1 < len(tokens):
+            nxt = tokens[index + 1].lower().replace(" ", "")
+            joined = lowered + nxt
+            if joined in {"ppm", "ppb"}:
+                merged.append(joined)
+                index += 2
+                continue
+        if index + 2 < len(tokens):
+            triple = (
+                lowered
+                + tokens[index + 1].lower().replace(" ", "")
+                + tokens[index + 2].lower().replace(" ", "")
+            )
+            if triple in {"ppm", "ppb"}:
+                merged.append(triple)
+                index += 3
+                continue
+        merged.append(current)
+        index += 1
+    return merged
+
+
 def reconstruct_limit_expression_from_pdf_words(
     words: list[tuple[float, float, float, float, str]],
 ) -> str | None:
@@ -1113,6 +1160,7 @@ def reconstruct_limit_expression_from_pdf_words(
     ordered = sorted(words, key=lambda item: (item[0], item[1]))
     tokens = [_normalize_word(item[4]) for item in ordered]
     tokens = [token for token in tokens if token]
+    tokens = _merge_ocr_unit_fragments(tokens)
     if not tokens:
         return None
 
@@ -1179,6 +1227,7 @@ def _cluster_words_by_x(
             token.isdigit()
             and not _is_unit_exponent_token(token)
             and not token.startswith("/")
+            and not _is_leading_zero_mantissa(token)
         )
         if gap >= _X_CLUSTER_GAP or (
             gap > 12
@@ -1240,6 +1289,296 @@ def _pdf_words(page) -> list[tuple[float, float, float, float, str]]:
     return result
 
 
+def _reconstructed_limit_has_unit(text: str | None) -> bool:
+    if not text:
+        return False
+    lowered = text.lower().replace(" ", "")
+    return (
+        "mg/m" in lowered
+        or "ppm" in lowered
+        or "ppb" in lowered
+        or "f/ml" in lowered
+    )
+
+
+def _header_column_anchors(page) -> dict[str, float] | None:
+    if page is None:
+        return None
+    stel_x: float | None = None
+    twa_x: float | None = None
+    mw_x: float | None = None
+    for word in page.get_text("words"):
+        if len(word) < 5:
+            continue
+        raw = str(word[4] or "")
+        token = _normalize_word(raw).upper().replace(" ", "")
+        center = (float(word[0]) + float(word[2])) / 2.0
+        if "STEL" in token:
+            stel_x = center
+        elif token == "TWA" or token.startswith("TWA"):
+            twa_x = center
+        elif token == "MW" or token.startswith("MW"):
+            mw_x = center
+        elif "ملکولی" in raw or "مولکولی" in raw:
+            mw_x = center
+    if stel_x is None or twa_x is None:
+        return None
+    anchors = {"stel": stel_x, "twa": twa_x}
+    if mw_x is not None:
+        anchors["mw"] = mw_x
+    return anchors
+
+
+def _limit_header_anchors(page) -> list[float] | None:
+    anchors = _header_column_anchors(page)
+    if not anchors:
+        return None
+    return [anchors["stel"], anchors["twa"]]
+
+
+def _cell_x_center(cell: Any) -> float | None:
+    bbox = _cell_bbox(cell)
+    if not bbox:
+        return None
+    return (bbox[0] + bbox[2]) / 2.0
+
+
+def _column_role_from_x(
+    x: float,
+    headers: dict[str, float],
+) -> str:
+    return min(headers, key=lambda role: abs(headers[role] - x))
+
+
+def _cluster_x_center(
+    cluster: list[tuple[float, float, float, float, str]],
+) -> float:
+    xs = [(word[0] + word[2]) / 2.0 for word in cluster]
+    return sum(xs) / len(xs)
+
+
+def _pick_limit_cluster(
+    clusters: list[list[tuple[float, float, float, float, str]]],
+    *,
+    limit_slot: int,
+    limit_slot_count: int,
+    anchors: list[float] | None,
+    target_x: float | None = None,
+) -> list[tuple[float, float, float, float, str]] | None:
+    scored: list[tuple[int, list[tuple[float, float, float, float, str]], str]] = []
+    for cluster in clusters:
+        reconstructed = reconstruct_limit_expression_from_pdf_words(cluster)
+        if not reconstructed or not _reconstructed_limit_has_unit(reconstructed):
+            continue
+        scored.append((id(cluster), cluster, reconstructed))
+    if not scored:
+        return None
+    limit_clusters = [item[1] for item in scored]
+    if anchors and len(anchors) >= 2:
+        assigned: dict[int, list[tuple[float, float, float, float, str]]] = {}
+
+        # Distance between STEL and TWA columns.
+        column_distance = abs(anchors[1] - anchors[0])
+
+        # A cluster must be reasonably close to a column anchor.
+        # Do not force every numeric cluster into one of the two columns.
+        max_column_distance = max(
+            30.0,
+            column_distance * 0.40,
+        )
+
+        for cluster in limit_clusters:
+            center = _cluster_x_center(cluster)
+
+            distances = [
+                abs(center - anchors[0]),
+                abs(center - anchors[1]),
+            ]
+
+            slot = 0 if distances[0] <= distances[1] else 1
+            distance = distances[slot]
+
+            # IMPORTANT:
+            # If a cluster is not actually close to either STEL/TWA
+            # column, leave it unassigned rather than guessing.
+            if distance > max_column_distance:
+                continue
+
+            previous = assigned.get(slot)
+
+            if (
+                previous is None
+                or distance
+                < abs(
+                    _cluster_x_center(previous)
+                    - anchors[slot]
+                )
+            ):
+                assigned[slot] = cluster
+
+        if target_x is not None:
+            requested = (
+                0
+                if abs(target_x - anchors[0])
+                <= abs(target_x - anchors[1])
+                else 1
+            )
+            print(
+    "DEBUG LIMIT CLUSTERS:",
+    {
+        "anchors": anchors,
+        "target_x": target_x,
+        "limit_slot": limit_slot,
+        "assigned": {
+            slot: {
+                "center": _cluster_x_center(cluster),
+                "text": [
+                    word[4]
+                    for word in cluster
+                ],
+                "reconstructed": reconstruct_limit_expression_from_pdf_words(cluster),
+            }
+            for slot, cluster in assigned.items()
+        },
+    },
+)
+            return assigned.get(requested)
+
+        return assigned.get(limit_slot)
+
+    if limit_slot < len(limit_clusters):
+        return limit_clusters[limit_slot]
+    return None
+
+
+def reconstruct_mw_expression_from_pdf_words(
+    words: list[tuple[float, float, float, float, str]],
+) -> str | None:
+    """Rebuild MW from a cluster that is not a STEL/TWA limit expression."""
+    if not words:
+        return None
+    ordered = sorted(words, key=lambda item: (item[0], item[1]))
+    tokens = [_normalize_word(item[4]) for item in ordered]
+    tokens = [token for token in tokens if token]
+    if any("\\cdot" in token or token.startswith("\\") for token in tokens):
+        return None
+    if any(_is_limit_unit_token(token) for token in tokens):
+        return None
+    limit = reconstruct_limit_expression_from_pdf_words(words)
+    if limit and _reconstructed_limit_has_unit(limit):
+        return None
+    kept = [
+        token
+        for token in tokens
+        if re.search(r"\d|[۰-۹٠-٩]", token) or token == "/" or token.startswith("/")
+    ]
+    if not kept:
+        return None
+    return " ".join(kept)
+
+
+def _pick_mw_cluster(
+    clusters: list[list[tuple[float, float, float, float, str]]],
+    *,
+    mw_x: float | None,
+    stel_x: float | None,
+    twa_x: float | None,
+) -> list[tuple[float, float, float, float, str]] | None:
+    if mw_x is None:
+        return None
+    scored: list[tuple[float, list, str]] = []
+    for cluster in clusters:
+        reconstructed = reconstruct_mw_expression_from_pdf_words(cluster)
+        if not reconstructed:
+            continue
+        center = _cluster_x_center(cluster)
+        if twa_x is not None and abs(center - twa_x) + 6.0 < abs(center - mw_x):
+            continue
+        if stel_x is not None and abs(center - stel_x) + 6.0 < abs(center - mw_x):
+            continue
+        scored.append((abs(center - mw_x), cluster, reconstructed))
+    if not scored:
+        return None
+    slash = [item for item in scored if "/" in item[2]]
+    pool = slash or scored
+    return min(pool, key=lambda item: item[0])[1]
+
+
+def _attach_nearby_unit_fragments(
+    page_words: list[tuple[float, float, float, float, str]],
+    selected: list[tuple[float, float, float, float, str]],
+    y0: float,
+    y1: float,
+) -> list[tuple[float, float, float, float, str]]:
+    if not selected:
+        return selected
+    extra: list[tuple[float, float, float, float, str]] = []
+    selected_keys = {(round(w[0], 3), round(w[1], 3), w[4]) for w in selected}
+    for word in page_words:
+        key = (round(word[0], 3), round(word[1], 3), word[4])
+        if key in selected_keys:
+            continue
+        word_y = (word[1] + word[3]) / 2.0
+        if word_y < y0 or word_y > y1:
+            continue
+        if not _is_ocr_unit_fragment(word[4]):
+            continue
+        word_x = (word[0] + word[2]) / 2.0
+        if any(
+            abs(word_x - (item[0] + item[2]) / 2.0) <= (_X_CLUSTER_GAP + 8.0)
+            and abs(word_y - (item[1] + item[3]) / 2.0) <= 6.0
+            for item in selected
+        ):
+            extra.append(word)
+    return selected + extra
+
+
+def _infer_limit_column_indices(
+    row: list[Any],
+    cas_column_index: int | None,
+    page=None,
+) -> list[int]:
+    indices: list[int] = []
+    for index, cell in enumerate(row):
+        if index == cas_column_index:
+            continue
+        if _cell_looks_like_limit(cell):
+            indices.append(index)
+    if not indices:
+        return []
+    first, last = min(indices), max(indices)
+    if first > 0 and first - 1 != cas_column_index:
+        left_text = str(getattr(row[first - 1], "text", "") or "").strip()
+        if (
+            left_text in {"", "-", "—", "–"}
+            or _da_limit_text_is_corrupted(left_text)
+        ) and (first - 1) not in indices:
+            indices.append(first - 1)
+    if last + 1 < len(row) and last + 1 != cas_column_index:
+        right_text = str(getattr(row[last + 1], "text", "") or "").strip()
+        if (
+            right_text in {"", "-", "—", "–"}
+            or _da_limit_text_is_corrupted(right_text)
+        ) and (last + 1) not in indices:
+            indices.append(last + 1)
+    indices = sorted(set(indices))[:2]
+    headers = _header_column_anchors(page)
+    if (
+        len(indices) == 1
+        and headers
+        and indices[0] > 0
+        and indices[0] - 1 != cas_column_index
+    ):
+        cell_x = _cell_x_center(row[indices[0]])
+        if (
+            cell_x is not None
+            and abs(cell_x - headers["twa"]) < abs(cell_x - headers["stel"])
+            and (indices[0] - 1) not in indices
+        ):
+            indices = sorted([indices[0] - 1, indices[0]])
+    return indices[:2]
+
+
 def _split_limit_cell_from_pdf(
     page,
     groups: list[list[str]],
@@ -1247,28 +1586,35 @@ def _split_limit_cell_from_pdf(
     *,
     limit_slot: int,
     limit_slot_count: int,
-) -> list[str | None] | None:
+    target_x: float | None = None,
+) -> tuple[list[str | None], list[list[str] | None]] | None:
     """
     Primary STEL/TWA source: PDF words in each CAS Y-band, clustered by X.
 
-    limit_slot 0 is the left (STEL/C) cluster, 1 is the right (TWA) cluster.
+    Clusters are assigned by STEL/TWA header X (or the cell's own X),
+    not by whether neighboring DA cells happen to look empty.
     """
 
     if page is None or not groups or not cas_y:
         return None
-    if limit_slot < 0:
+    if limit_slot < 0 and target_x is None:
         return None
 
     bands = _group_y_bands(groups, cas_y)
     page_words = _pdf_words(page)
     if not page_words:
         return None
+    anchors = _limit_header_anchors(page)
+    if target_x is None and anchors and 0 <= limit_slot < len(anchors):
+        target_x = anchors[limit_slot]
 
     values: list[str | None] = []
+    traces: list[list[str] | None] = []
     found_any = False
     for band in bands:
         if band is None:
             values.append(None)
+            traces.append(None)
             continue
         y0, y1 = band
         in_band = []
@@ -1285,17 +1631,20 @@ def _split_limit_cell_from_pdf(
                 or token.startswith("/")
             ):
                 in_band.append(word)
+        in_band = _attach_nearby_unit_fragments(
+            page_words,
+            in_band,
+            y0,
+            y1,
+        )
         clusters = _cluster_words_by_x(in_band)
-        cluster: list[tuple[float, float, float, float, str]] | None = None
-        if not clusters:
-            values.append(None)
-            continue
-        if limit_slot_count <= 1:
-            cluster = clusters[0] if len(clusters) == 1 else None
-            if cluster is None and 0 <= limit_slot < len(clusters):
-                cluster = clusters[limit_slot]
-        elif limit_slot < len(clusters):
-            cluster = clusters[limit_slot]
+        cluster = _pick_limit_cluster(
+            clusters,
+            limit_slot=max(limit_slot, 0),
+            limit_slot_count=limit_slot_count,
+            anchors=anchors,
+            target_x=target_x,
+        )
         reconstructed = (
             reconstruct_limit_expression_from_pdf_words(cluster)
             if cluster
@@ -1303,9 +1652,95 @@ def _split_limit_cell_from_pdf(
         )
         if reconstructed:
             found_any = True
+            traces.append([item[4] for item in cluster] if cluster else None)
+        else:
+            traces.append(None)
         values.append(reconstructed)
 
-    return values if found_any else None
+    if not found_any:
+        return None
+    return values, traces
+
+
+def _split_mw_cell_from_pdf(
+    page,
+    groups: list[list[str]],
+    cas_y: dict[str, float],
+) -> tuple[list[str | None], list[list[str] | None]] | None:
+    if page is None or not groups or not cas_y:
+        return None
+    headers = _header_column_anchors(page)
+    if not headers or "mw" not in headers:
+        return None
+    bands = _group_y_bands(groups, cas_y)
+    page_words = _pdf_words(page)
+    if not page_words:
+        return None
+    values: list[str | None] = []
+    traces: list[list[str] | None] = []
+    found_any = False
+    for band in bands:
+        if band is None:
+            values.append(None)
+            traces.append(None)
+            continue
+        y0, y1 = band
+        in_band = [
+            word
+            for word in page_words
+            if y0 <= (word[1] + word[3]) / 2.0 <= y1
+            and (
+                _looks_like_latex_or_number(word[4])
+                or word[4] == "/"
+                or word[4].startswith("/")
+                or _is_limit_unit_token(word[4])
+                or _is_unit_exponent_token(word[4])
+            )
+        ]
+        clusters = _cluster_words_by_x(in_band)
+        cluster = _pick_mw_cluster(
+            clusters,
+            mw_x=headers.get("mw"),
+            stel_x=headers.get("stel"),
+            twa_x=headers.get("twa"),
+        )
+        reconstructed = (
+            reconstruct_mw_expression_from_pdf_words(cluster)
+            if cluster
+            else None
+        )
+        if reconstructed:
+            found_any = True
+            traces.append([item[4] for item in cluster] if cluster else None)
+        else:
+            traces.append(None)
+        values.append(reconstructed)
+    if not found_any:
+        return None
+    return values, traces
+
+
+def _resolve_column_role(
+    cell: Any,
+    page,
+    limit_slot: int | None,
+) -> str | None:
+    # Structural STEL/TWA slots stay STEL/TWA even when DA bboxes drift.
+    if limit_slot == 0:
+        return "stel"
+    if limit_slot == 1:
+        return "twa"
+    headers = _header_column_anchors(page) if page is not None else None
+    cell_x = _cell_x_center(cell)
+    bbox = _cell_bbox(cell)
+    if cell_x is not None and headers and bbox is not None:
+        width = bbox[2] - bbox[0]
+        header_span = max(headers.values()) - min(headers.values())
+        if header_span > 0 and width < header_span * 0.55:
+            role = _column_role_from_x(cell_x, headers)
+            if role == "mw" and abs(cell_x - headers["mw"]) <= 50.0:
+                return "mw"
+    return None
 
 
 def _split_nonchemical_cell_by_geometry(
@@ -1317,6 +1752,8 @@ def _split_nonchemical_cell_by_geometry(
     y_threshold: float = 8.0,
     limit_slot: int | None = None,
     limit_slot_count: int = 0,
+    trace_out: list | None = None,
+    column_role: str | None = None,
 ) -> list[str | None]:
     """
     Determine which physical row owns a non-chemical cell.
@@ -1347,31 +1784,68 @@ def _split_nonchemical_cell_by_geometry(
         else ""
     )
 
-    prefer_pdf = (
-        page is not None
-        and limit_slot is not None
-        and _cell_looks_like_limit(cell)
-        and (
-            count > 1
-            or _da_limit_text_is_corrupted(original_text)
-        )
-    )
+    role = column_role or _resolve_column_role(cell, page, limit_slot)
+    headers = _header_column_anchors(page) if page is not None else None
+    target_x = None
+    if role in {"stel", "twa"} and headers and role in headers:
+        target_x = headers[role]
 
+    prefer_pdf = page is not None and role in {"stel", "twa"}
+    prefer_mw_pdf = page is not None and role == "mw"
+
+    pdf_word_traces: list[list[str] | None] = []
     if prefer_pdf:
-        pdf_values = _split_limit_cell_from_pdf(
+        pdf_split = _split_limit_cell_from_pdf(
             page,
             groups,
             cas_y,
-            limit_slot=limit_slot,
-            limit_slot_count=limit_slot_count,
+            limit_slot=0 if role == "stel" else 1,
+            limit_slot_count=max(limit_slot_count, 2),
+            target_x=target_x,
         )
-        if pdf_values is not None:
+        if pdf_split is not None:
+            pdf_values, pdf_word_traces = pdf_split
             if len(pdf_values) < count:
                 pdf_values = pdf_values + [None] * (
                     count - len(pdf_values)
                 )
+                pdf_word_traces = pdf_word_traces + [None] * (
+                    count - len(pdf_word_traces)
+                )
+            if trace_out is not None:
+                trace_out.clear()
+                trace_out.extend(pdf_word_traces[:count])
             return pdf_values[:count]
         if _da_limit_text_is_corrupted(original_text):
+            if trace_out is not None:
+                trace_out.clear()
+                trace_out.extend([None] * count)
+            return [None for _ in range(count)]
+        if headers:
+            if trace_out is not None:
+                trace_out.clear()
+                trace_out.extend([None] * count)
+            return [None for _ in range(count)]
+
+    if prefer_mw_pdf:
+        mw_split = _split_mw_cell_from_pdf(page, groups, cas_y)
+        if mw_split is not None:
+            pdf_values, pdf_word_traces = mw_split
+            if len(pdf_values) < count:
+                pdf_values = pdf_values + [None] * (
+                    count - len(pdf_values)
+                )
+                pdf_word_traces = pdf_word_traces + [None] * (
+                    count - len(pdf_word_traces)
+                )
+            if trace_out is not None:
+                trace_out.clear()
+                trace_out.extend(pdf_word_traces[:count])
+            return pdf_values[:count]
+        if _reconstructed_limit_has_unit(original_text):
+            if trace_out is not None:
+                trace_out.clear()
+                trace_out.extend([None] * count)
             return [None for _ in range(count)]
 
     if (
@@ -1530,12 +2004,6 @@ def _clear_cell_value(
 
     if hasattr(
         cell,
-        "bbox",
-    ):
-        cell.bbox = None
-
-    if hasattr(
-        cell,
         "bbox_confidence",
     ):
         cell.bbox_confidence = None
@@ -1545,6 +2013,149 @@ def _clear_cell_value(
         "bbox_source",
     ):
         cell.bbox_source = None
+
+
+def _cas_geometry_records(
+    cas_values: list[str],
+    cas_geometry: list[CasGeometry],
+    chemical_cell: Any,
+    *,
+    y_threshold: float,
+) -> list[dict[str, Any]]:
+    """Preserve source CAS bboxes that belong to the chemical-name cell."""
+
+    wanted = {
+        _normalize_cas(cas)
+        for cas in cas_values
+    }
+    bbox = _cell_bbox(chemical_cell)
+    records: list[dict[str, Any]] = []
+    seen: set[str] = set()
+
+    for geometry in cas_geometry:
+        cas = _normalize_cas(geometry.cas)
+        if cas not in wanted or cas in seen:
+            continue
+        if bbox is not None:
+            x0, y0, x1, y1 = bbox
+            if (
+                geometry.y1 < y0 - y_threshold
+                or geometry.y > y1 + y_threshold
+            ):
+                continue
+            if geometry.x1 < x0 - 20.0 or geometry.x0 > x1 + 20.0:
+                continue
+        seen.add(cas)
+        records.append(
+            {
+                "cas": cas,
+                "y": geometry.y,
+                "y1": geometry.y1,
+                "x0": geometry.x0,
+                "x1": geometry.x1,
+            }
+        )
+
+    return records
+
+
+def _all_cas_inside_chemical_cell_bbox(
+    chemical_cell: Any,
+    cas_values: list[str],
+    cas_geometry: list[CasGeometry],
+    *,
+    y_threshold: float,
+) -> bool:
+    """True when every CAS word sits inside one chemical-name cell."""
+
+    bbox = _cell_bbox(chemical_cell)
+    if bbox is None or len(cas_values) < 2:
+        return False
+
+    x0, y0, x1, y1 = bbox
+    wanted = {
+        _normalize_cas(cas)
+        for cas in cas_values
+    }
+    matched: set[str] = set()
+
+    for geometry in cas_geometry:
+        cas = _normalize_cas(geometry.cas)
+        if cas not in wanted:
+            continue
+        vertical = not (
+            geometry.y1 < y0 - y_threshold
+            or geometry.y > y1 + y_threshold
+        )
+        horizontal = not (
+            geometry.x1 < x0 - 20.0
+            or geometry.x0 > x1 + 20.0
+        )
+        if vertical and horizontal:
+            matched.add(cas)
+
+    return wanted <= matched
+
+
+def _da_nonchemical_cells_have_multiple_measured_values(
+    row: list[Any],
+    cas_column_index: int,
+) -> bool:
+    """
+    Document AI merged two physical limit rows into one visual row.
+
+    Packed STEL/TWA/MW text with two measured values is independent
+    evidence of a real table-row split. A single limit value is not.
+    """
+
+    for index, cell in enumerate(row):
+        if index == cas_column_index:
+            continue
+        packed = _pack_source_values(
+            str(getattr(cell, "text", "") or "")
+        )
+        # MW slash pairs such as "56 / 11" are one value. Two physical
+        # rows show two unit-bearing limits in one DA cell.
+        limit_values = [
+            value
+            for value in packed
+            if _reconstructed_limit_has_unit(value)
+        ]
+        if len(limit_values) >= 2:
+            return True
+    return False
+
+
+def _annotate_collapsed_cas_groups(
+    row: list[Any],
+    chemical_cell: Any,
+    cas_column_index: int,
+    groups: list[list[str]],
+    cas_geometry: list[CasGeometry],
+    *,
+    y_threshold: float,
+) -> list[list[Any]]:
+    """Keep one logical row; attach CAS bbox provenance only."""
+
+    annotated = copy.deepcopy(row)
+    if cas_column_index < len(annotated):
+        cell = annotated[cas_column_index]
+        previous = getattr(cell, "source_reference", None) or {}
+        cell.source_reference = {
+            **previous,
+            "cas_y_groups_collapsed": True,
+            "collapse_reason": (
+                "cas_y_groups_inside_merged_chemical_name_cell"
+            ),
+            "physical_cas_groups": groups,
+            "cas_source_geometry": _cas_geometry_records(
+                _extract_row_cas(row),
+                cas_geometry,
+                chemical_cell,
+                y_threshold=y_threshold,
+            ),
+        }
+    return [annotated]
 
 
 # ============================================================================
@@ -1632,6 +2243,50 @@ def _split_row_by_cas_geometry(
     if cell_positions:
         cas_y.update(dict(cell_positions))
 
+    # CAS Y-groups are visual lines inside a name cell, not table rows.
+    # Split only when Document AI packed multiple measured limit values
+    # into a non-chemical cell (true merged physical rows).
+    print(
+    "DEBUG CAS SPLIT DECISION:",
+    {
+        "row_cas": row_cas,
+        "groups": groups,
+        "cas_column_index": cas_column_index,
+        "chemical_text": getattr(chemical_cell, "text", "") or "",
+        "all_inside": _all_cas_inside_chemical_cell_bbox(
+            chemical_cell,
+            row_cas,
+            cas_geometry,
+            y_threshold=y_threshold,
+        ),
+        "nonchemical_multi_limit": _da_nonchemical_cells_have_multiple_measured_values(
+            row,
+            cas_column_index,
+        ),
+    }
+)
+    if (
+        len(groups) > 1
+        and _all_cas_inside_chemical_cell_bbox(
+            chemical_cell,
+            row_cas,
+            cas_geometry,
+            y_threshold=y_threshold,
+        )
+        and not _da_nonchemical_cells_have_multiple_measured_values(
+            row,
+            cas_column_index,
+        )
+    ):
+        return _annotate_collapsed_cas_groups(
+            row,
+            chemical_cell,
+            cas_column_index,
+            groups,
+            cas_geometry,
+            y_threshold=y_threshold,
+        )
+
     chemical_text = (
         getattr(
             chemical_cell,
@@ -1648,11 +2303,11 @@ def _split_row_by_cas_geometry(
         )
     )
 
-    limit_indices = [
-        index
-        for index, cell in enumerate(row)
-        if index != cas_column_index and _cell_looks_like_limit(cell)
-    ]
+    limit_indices = _infer_limit_column_indices(
+        row,
+        cas_column_index,
+        page=page,
+    )
 
     # ------------------------------------------------------------------
     # Build physical rows.
@@ -1741,6 +2396,7 @@ def _split_row_by_cas_geometry(
                 else None
             )
 
+            traces: list = []
             split_values = (
                 _split_nonchemical_cell_by_geometry(
                     cell,
@@ -1750,6 +2406,7 @@ def _split_row_by_cas_geometry(
                     y_threshold=y_threshold,
                     limit_slot=limit_slot,
                     limit_slot_count=len(limit_indices),
+                    trace_out=traces,
                 )
             )
 
@@ -1793,15 +2450,20 @@ def _split_row_by_cas_geometry(
                 "da_original_text": original_da_text,
             }
 
-            if (
-                value
-                and original_da_text
-                and "\\cdot" in str(original_da_text)
-                and "\\cdot" not in str(value)
-            ):
+            pdf_words = (
+                traces[group_index]
+                if group_index < len(traces)
+                else None
+            )
+            if value and pdf_words:
                 new_cell.source_reference["numeric_source"] = (
                     "pymupdf_words"
                 )
+                new_cell.source_reference["pdf_source_words"] = pdf_words
+                if page is not None and hasattr(page, "number"):
+                    new_cell.source_reference["page"] = (
+                        int(page.number) + 1
+                    )
 
             if value is None:
 
@@ -1963,3 +2625,114 @@ def split_table_rows_by_cas_geometry(
         reindexed_rows,
         split_count,
     )
+
+
+def _roles_from_header_row(header: list[Any]) -> dict[int, str]:
+    roles: dict[int, str] = {}
+    for cell in header:
+        text = str(getattr(cell, "text", "") or "")
+        column = getattr(cell, "column", None)
+        if column is None:
+            continue
+        col = int(column)
+        upper = text.upper()
+        if "STEL" in upper:
+            roles[col] = "stel"
+        elif "TWA" in upper:
+            roles[col] = "twa"
+        elif (
+            "ملکولی" in text
+            or "مولکولی" in text
+            or re.search(r"\bMW\b", upper)
+        ):
+            roles[col] = "mw"
+    return roles
+
+
+def repair_oel_numeric_from_pdf_headers(
+    rows: list[list[Any]],
+    page,
+    y_threshold: float = 8.0,
+) -> list[list[Any]]:
+    """
+    After STEL/TWA occupy distinct structural columns, assign PDF evidence
+    by header identity rather than DA cell order.
+    """
+    if page is None or len(rows) < 2:
+        return rows
+    roles = _roles_from_header_row(rows[0])
+    if "stel" not in roles.values() or "twa" not in roles.values():
+        return rows
+    cas_geometry = extract_cas_geometry(page)
+    repaired = [rows[0]]
+    for row in rows[1:]:
+        row_cas = _extract_row_cas(row)
+        if not row_cas or not cas_geometry:
+            repaired.append(row)
+            continue
+        groups = (
+            group_cas_by_pdf_row(
+                row_cas,
+                cas_geometry,
+                y_threshold=y_threshold,
+            )
+            if len(row_cas) > 1
+            else [list(row_cas)]
+        )
+        cas_column_index = None
+        best = 0
+        for index, cell in enumerate(row):
+            found = _extract_cas_from_text(getattr(cell, "text", "") or "")
+            if len(found) > best:
+                best = len(found)
+                cas_column_index = index
+        cas_y = _cas_y_map(row_cas, cas_geometry)
+        if cas_column_index is not None:
+            positions = _cas_positions_for_cell(
+                row[cas_column_index],
+                row_cas,
+                cas_geometry,
+                page=page,
+                y_tolerance=y_threshold,
+            )
+            if positions:
+                cas_y.update(dict(positions))
+        new_row = []
+        for cell in row:
+            column = getattr(cell, "column", None)
+            role = roles.get(int(column)) if column is not None else None
+            if role not in {"stel", "twa", "mw"}:
+                new_row.append(cell)
+                continue
+            traces: list = []
+            values = _split_nonchemical_cell_by_geometry(
+                cell,
+                groups,
+                cas_y,
+                page=page,
+                y_threshold=y_threshold,
+                limit_slot=0 if role == "stel" else 1 if role == "twa" else None,
+                limit_slot_count=2,
+                trace_out=traces,
+                column_role=role,
+            )
+            value = values[0] if values else None
+            new_cell = _clone_cell(cell, row_index=getattr(cell, "row", 0), text=value)
+            original_da = getattr(cell, "text", None)
+            new_cell.source_reference = {
+                **(getattr(new_cell, "source_reference", None) or {}),
+                "da_original_text": original_da,
+            }
+            pdf_words = traces[0] if traces else None
+            if value and pdf_words:
+                new_cell.source_reference["numeric_source"] = "pymupdf_words"
+                new_cell.source_reference["pdf_source_words"] = pdf_words
+            if value is None:
+                _clear_cell_value(new_cell)
+                new_cell.source_reference["physical_value_unresolved"] = True
+                new_cell.source_reference["resolution_reason"] = (
+                    "numeric_or_cell_value_could_not_be_assigned_safely_to_physical_row"
+                )
+            new_row.append(new_cell)
+        repaired.append(new_row)
+    return repaired

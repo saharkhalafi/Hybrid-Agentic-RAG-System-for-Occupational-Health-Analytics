@@ -206,11 +206,16 @@ def _build_header_grid(
 def _has_exposure_sibling(
     column_index: int,
     all_headers: dict[int, list[tuple[str, int]]],
+    *,
+    physical_column_count: int | None = None,
 ) -> bool:
     sibling = column_index + 1
-    if sibling not in all_headers:
+    sibling_present = sibling in all_headers or (
+        physical_column_count is not None and sibling < physical_column_count
+    )
+    if not sibling_present:
         return False
-    texts = [t for t, _ in all_headers[sibling]]
+    texts = [t for t, _ in all_headers.get(sibling, [])]
     combined = " ".join(texts).lower().strip()
     if not combined:
         # Empty sibling under merged exposure parent.
@@ -226,6 +231,7 @@ def _infer_exposure_children(
     header_parts: list[str],
     *,
     all_headers: dict[int, list[tuple[str, int]]],
+    physical_column_count: int | None = None,
 ) -> tuple[str, list[str]]:
     non_empty_parts = [p for p in header_parts if p.strip()]
     combined = " ".join(non_empty_parts).lower()
@@ -246,7 +252,9 @@ def _infer_exposure_children(
 
     has_stel = "stel" in combined
     has_twa = "twa" in combined
-    sibling = _has_exposure_sibling(column_index, all_headers)
+    sibling = _has_exposure_sibling(
+        column_index, all_headers, physical_column_count=physical_column_count
+    )
 
     if has_stel and has_twa and sibling:
         return "exposure_limit.stel_c", [parent or "حد مجاز مواجهه شغلی", "STEL/C"]
@@ -267,6 +275,7 @@ def _semantic_field_for_column(
     header_parts: list[str],
     *,
     all_headers: dict[int, list[tuple[str, int]]],
+    physical_column_count: int | None = None,
 ) -> tuple[str, list[str]]:
     # Prefer explicit child labels from the deepest header row.
     for part in reversed(header_parts):
@@ -281,21 +290,29 @@ def _semantic_field_for_column(
     combined = " ".join(header_parts)
     matched = _match_semantic(combined)
     if matched == "exposure_limit.parent":
-        return _infer_exposure_children(column_index, header_parts, all_headers=all_headers)
+        return _infer_exposure_children(
+            column_index,
+            header_parts,
+            all_headers=all_headers,
+            physical_column_count=physical_column_count,
+        )
     if matched:
         label = header_parts[-1] if header_parts else combined
         return matched, header_parts or [label]
 
     if not any(p.strip() for p in header_parts) and column_index > 0:
-        return _infer_exposure_children(column_index, header_parts, all_headers=all_headers)
+        return _infer_exposure_children(
+            column_index,
+            header_parts,
+            all_headers=all_headers,
+            physical_column_count=physical_column_count,
+        )
 
     if not any(p.strip() for p in header_parts):
         return f"column_{column_index}", [f"column_{column_index}"]
 
-    prev_parts = [t for t, _ in all_headers.get(column_index - 1, [])]
-    if prev_parts and any("حد مجاز" in p or "stel" in p.lower() or "twa" in p.lower() for p in prev_parts if p.strip()):
-        return _infer_exposure_children(column_index, prev_parts + header_parts, all_headers=all_headers)
-
+    # Do not steal STEL/TWA identity from a neighbouring header when this
+    # column already has its own unmatched label (e.g. MW fragments).
     return f"column_{column_index}", header_parts or [f"column_{column_index}"]
 
 
@@ -341,34 +358,35 @@ def _apply_recovery_hints(
     physical_columns: list[PhysicalColumn],
     hints: dict[int, str],
 ) -> list[PhysicalColumn]:
+    """Fill unknown columns from recovery metadata. Never overwrite a valid header mapping."""
     if not hints:
         return physical_columns
     updated: list[PhysicalColumn] = []
     for col in physical_columns:
         hint = hints.get(col.column_index)
-        if not hint:
+        if not hint or not col.semantic_field.startswith("column_"):
             updated.append(col)
             continue
         semantic = _RECOVERY_COLUMN_HINTS.get(hint, hint)
-        if semantic in {"health_effect", "STEL", "TWA", "molecular_weight", "chemical_name", "row_number", "symbols"}:
-            legacy = _legacy_field_name(semantic if semantic != hint else hint)
-            if hint == "health_effect":
-                legacy = "health_effect"
-            path = col.header_path
-            if hint in {"STEL", "TWA"}:
-                parent = next((p for p in path if "حد مجاز" in p), "حد مجاز مواجهه شغلی")
-                path = [parent, hint if hint != "STEL" else "STEL/C"]
-            updated.append(
-                PhysicalColumn(
-                    physical_column_id=col.physical_column_id,
-                    column_index=col.column_index,
-                    header_path=path,
-                    semantic_field=semantic if semantic.startswith("exposure_limit") else hint,
-                    parent_header=path[0] if len(path) > 1 else col.parent_header,
-                )
+        if hint == "health_effect":
+            semantic = "exposure_basis"
+        elif hint == "STEL":
+            semantic = "exposure_limit.stel_c"
+        elif hint == "TWA":
+            semantic = "exposure_limit.twa"
+        path = col.header_path
+        if hint in {"STEL", "TWA"}:
+            parent = next((p for p in path if "حد مجاز" in p), "حد مجاز مواجهه شغلی")
+            path = [parent, hint if hint != "STEL" else "STEL/C"]
+        updated.append(
+            PhysicalColumn(
+                physical_column_id=col.physical_column_id,
+                column_index=col.column_index,
+                header_path=path,
+                semantic_field=semantic,
+                parent_header=path[0] if len(path) > 1 else col.parent_header,
             )
-        else:
-            updated.append(col)
+        )
     return updated
 
 
@@ -416,7 +434,12 @@ def reconstruct_header_structure(
 
     for col_idx in range(physical_column_count):
         parts = [text for text, _ in header_grid.get(col_idx, [])]
-        semantic, path = _semantic_field_for_column(col_idx, parts, all_headers=header_grid)
+        semantic, path = _semantic_field_for_column(
+            col_idx,
+            parts,
+            all_headers=header_grid,
+            physical_column_count=physical_column_count,
+        )
         parent = path[0] if len(path) > 1 else None
         physical_columns.append(
             PhysicalColumn(

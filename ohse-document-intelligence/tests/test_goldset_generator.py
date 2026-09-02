@@ -441,6 +441,27 @@ def test_validation_engine_flags_ocr_corrupted_stel_for_review():
     )
 
 
+def test_parse_molecular_weight_rtl_visual_order():
+    from goldset_generator.oel_row_parser import (
+        parse_layer2_molecular_weight,
+        parse_molecular_weight,
+    )
+
+    assert parse_layer2_molecular_weight("08 / 71") == "71.08"
+    assert parse_layer2_molecular_weight("06 / 72") == "72.06"
+    assert parse_layer2_molecular_weight("05 / 53") == "53.05"
+    assert parse_layer2_molecular_weight("14 / 146") == "146.14"
+    assert parse_layer2_molecular_weight("10 / 108") == "108.10"
+    assert parse_layer2_molecular_weight("8/ 269") == "269.8"
+    assert parse_layer2_molecular_weight("26 / 190") == "190.26"
+    assert parse_molecular_weight("183/16") == "183.16"
+    assert parse_molecular_weight("222/68") == "222.68"
+    assert parse_molecular_weight("41/05") == "41.05"
+    assert parse_layer2_molecular_weight("183/16") is None
+    assert parse_layer2_molecular_weight("41/05") is None
+    assert parse_layer2_molecular_weight("26/98") is None
+
+
 def test_oel_row_parser_page_47_merged_cell():
     from goldset_generator.oel_row_parser import enrich_oel_rows, split_chemical_segments
 
@@ -794,3 +815,301 @@ def test_expand_oel_basis_symbols_column_page_51():
     assert cells[4].text == "وزن ملکولی"
     assert cells[5].text == "نام علمی ماده شیمیایی"
     assert cells[6].text == "ردیف"
+
+
+def test_pdf_words_assign_stel_left_and_twa_right_without_swapping():
+    from ingestion.table_recovery import WordToken, recover_stel_twa_from_words
+
+    page_width = 694.8
+    swapped_dai_order = [
+        WordToken("20", 316.2, 170.0, 324.6, 182.0, 47),
+        WordToken("ppm", 327.2, 170.0, 345.0, 182.0, 47),
+        WordToken("40ppm", 250.6, 170.0, 276.7, 182.0, 47),
+        WordToken("41", 381.3, 170.0, 389.6, 182.0, 47),
+    ]
+    recovered = recover_stel_twa_from_words(swapped_dai_order, page_width, 165.0, 185.0)
+    assert recovered["STEL"] is not None and "40" in recovered["STEL"]
+    assert recovered["TWA"] is not None and "20" in recovered["TWA"]
+    assert "40" not in (recovered["TWA"] or "")
+    assert "20" not in (recovered["STEL"] or "")
+
+    already_correct = [
+        WordToken("2", 252.9, 200.0, 257.0, 212.0, 50),
+        WordToken("ppm", 257.1, 200.0, 274.9, 212.0, 50),
+        WordToken("1", 318.3, 200.0, 322.4, 212.0, 50),
+        WordToken("ppm", 325.0, 200.0, 342.8, 212.0, 50),
+    ]
+    recovered = recover_stel_twa_from_words(already_correct, page_width, 195.0, 215.0)
+    assert recovered["STEL"] is not None and "2" in recovered["STEL"]
+    assert recovered["TWA"] is not None and "1" in recovered["TWA"]
+    assert "1" not in recovered["STEL"].replace("ppm", "")
+
+
+def test_pdf_limit_band_ignores_molecular_weight_x():
+    from ingestion.table_recovery import WordToken, recover_stel_twa_from_words
+
+    page_width = 694.8
+    words = [
+        WordToken("1", 318.5, 250.0, 322.6, 262.0, 49),
+        WordToken("ppm", 324.8, 250.0, 342.6, 262.0, 49),
+        WordToken("76", 381.3, 250.0, 389.6, 262.0, 49),
+        WordToken("/", 389.7, 250.0, 392.3, 262.0, 49),
+        WordToken("50", 392.4, 250.0, 400.5, 262.0, 49),
+    ]
+    recovered = recover_stel_twa_from_words(words, page_width, 245.0, 265.0)
+    assert recovered["TWA"] is not None and "1" in recovered["TWA"]
+    assert recovered["STEL"] is None
+    assert "76" not in (recovered["TWA"] or "")
+    assert "50" not in (recovered["TWA"] or "")
+
+
+def test_cloned_limit_bboxes_need_pdf_x_assignment():
+    from goldset_generator.table_gold_generator import pdf_limit_replace_fields
+
+    page_width = 694.8
+    cloned = {"x": 327.17, "y": 167.57, "width": 17.83, "height": 11.03}
+    row = [
+        {"column": 2, "text": "20 ppm", "bbox": cloned},
+        {"column": 3, "text": "40ppm", "bbox": dict(cloned)},
+        {
+            "column": 5,
+            "text": "Acetonitrile",
+            "bbox": {"x": 465.7, "y": 178.4, "width": 34.5, "height": 10.0},
+        },
+    ]
+    assert pdf_limit_replace_fields(row, page_width) == {"STEL", "TWA"}
+
+
+def test_distinct_parsed_stel_twa_do_not_need_pdf_overlay():
+    from goldset_generator.table_gold_generator import pdf_limit_replace_fields
+
+    page_width = 694.8
+    row = [
+        {
+            "column": 2,
+            "text": "2 ppm",
+            "bbox": {"x": 244.0, "y": 200.0, "width": 30.0, "height": 11.0},
+        },
+        {
+            "column": 3,
+            "text": "1 ppm",
+            "bbox": {"x": 317.0, "y": 200.0, "width": 30.0, "height": 11.0},
+        },
+        {
+            "column": 4,
+            "text": "58.08",
+            "bbox": {"x": 379.0, "y": 200.0, "width": 23.0, "height": 12.0},
+        },
+    ]
+    assert pdf_limit_replace_fields(row, page_width) == set()
+
+
+def test_spanned_stel_bbox_and_twa_column_park_need_pdf_x_assignment():
+    from goldset_generator.table_gold_generator import pdf_limit_replace_fields
+
+    page_width = 694.8
+    spanned = [
+        {
+            "column": 2,
+            "text": "ppm 1",
+            "bbox": {"x": 258.17, "y": 250.75, "width": 64.47, "height": 15.63},
+        },
+        {"column": 3, "text": "", "bbox": None},
+    ]
+    assert "STEL" in pdf_limit_replace_fields(spanned, page_width)
+    assert "TWA" in pdf_limit_replace_fields(spanned, page_width)
+
+    parked_in_twa_x = [
+        {
+            "column": 2,
+            "text": "0.1 f/cc",
+            "bbox": {"x": 340.49, "y": 293.1, "width": 7.92, "height": 7.17},
+        },
+        {"column": 3, "text": "", "bbox": None},
+    ]
+    assert pdf_limit_replace_fields(parked_in_twa_x, page_width) == {"STEL", "TWA"}
+
+
+def test_unreadable_ocr_limit_needs_pdf_x_assignment():
+    from goldset_generator.table_gold_generator import pdf_limit_replace_fields
+
+    page_width = 694.8
+    row = [
+        {"column": 2, "text": r"rr~mg/m^{3(l)}", "bbox": None},
+        {"column": 3, "text": r"4~mg/m^{3(l)}", "bbox": None},
+        {
+            "column": 4,
+            "text": "223.25",
+            "bbox": {"x": 379.27, "y": 264.04, "width": 23.31, "height": 12.66},
+        },
+    ]
+    assert pdf_limit_replace_fields(row, page_width) == {"STEL", "TWA"}
+
+
+def test_empty_stel_and_twa_need_pdf_x_assignment():
+    from goldset_generator.table_gold_generator import pdf_limit_replace_fields
+
+    page_width = 694.8
+    row = [
+        {"column": 2, "text": "", "bbox": None},
+        {"column": 3, "text": None, "bbox": None},
+        {
+            "column": 4,
+            "text": "84.08",
+            "bbox": {"x": 381.31, "y": 161.90, "width": 19.23, "height": 12.66},
+        },
+        {
+            "column": 6,
+            "text": "41",
+            "bbox": {"x": 594.22, "y": 161.90, "width": 8.19, "height": 12.66},
+        },
+    ]
+    assert pdf_limit_replace_fields(row, page_width) == {"STEL", "TWA"}
+
+
+def test_twa_bbox_parked_in_mw_column_needs_pdf_x_assignment():
+    from goldset_generator.table_gold_generator import pdf_limit_replace_fields
+
+    page_width = 694.8
+    row = [
+        {"column": 2, "text": "", "bbox": None},
+        {
+            "column": 3,
+            "text": "20 mg/m3",
+            "bbox": {"x": 391.75, "y": 128.75, "width": 2.63, "height": 12.66},
+        },
+        {
+            "column": 4,
+            "text": "106 / 12",
+            "bbox": {"x": 379.27, "y": 128.75, "width": 23.31, "height": 12.66},
+        },
+    ]
+    assert pdf_limit_replace_fields(row, page_width) == {"STEL", "TWA"}
+
+
+def test_valid_stel_with_empty_twa_does_not_need_pdf_overlay():
+    from goldset_generator.table_gold_generator import pdf_limit_replace_fields
+
+    page_width = 694.8
+    row = [
+        {"column": 2, "text": "C0.05 ppm", "bbox": None},
+        {"column": 3, "text": "", "bbox": None},
+        {
+            "column": 4,
+            "text": "56.06",
+            "bbox": {"x": 391.75, "y": 352.51, "width": 2.63, "height": 12.66},
+        },
+    ]
+    assert pdf_limit_replace_fields(row, page_width) == set()
+
+
+def test_pdf_words_recover_empty_dai_row_and_mw_spilled_twa():
+    from ingestion.table_recovery import WordToken, recover_stel_twa_from_words
+    from pipeline_contracts.numeric_integrity import parse_numeric_cell
+
+    page_width = 694.8
+    empty_dai_row = [
+        WordToken("-", 261.8, 162.5, 266.0, 175.2, 51),
+        WordToken("2/0", 310.7, 162.5, 321.8, 175.2, 51),
+        WordToken("mg/m", 323.7, 159.5, 347.0, 170.6, 51),
+        WordToken("84", 381.3, 161.9, 389.6, 174.6, 51),
+        WordToken("41", 594.2, 161.9, 602.4, 174.6, 51),
+    ]
+    recovered = recover_stel_twa_from_words(empty_dai_row, page_width, 156.9, 179.6)
+    assert recovered["STEL"] is not None and recovered["STEL"].strip() in {"-", "—", "–"}
+    twa = parse_numeric_cell(recovered["TWA"] or "", field_type="TWA")
+    assert twa.normalized_value == "0.2"
+
+    spilled = [
+        WordToken("20", 246.5, 129.3, 254.7, 142.0, 55),
+        WordToken("mg/m", 254.8, 126.4, 278.2, 137.4, 55),
+        WordToken("5", 314.0, 129.3, 318.1, 142.0, 55),
+        WordToken("mg/m", 320.8, 126.4, 343.9, 137.4, 55),
+        WordToken("106", 379.3, 128.8, 391.7, 141.4, 55),
+        WordToken("73", 594.2, 128.8, 602.4, 141.4, 55),
+    ]
+    recovered = recover_stel_twa_from_words(spilled, page_width, 123.8, 146.4)
+    stel = parse_numeric_cell(recovered["STEL"] or "", field_type="STEL")
+    twa = parse_numeric_cell(recovered["TWA"] or "", field_type="TWA")
+    assert stel.normalized_value == "20"
+    assert twa.normalized_value == "5"
+
+
+def test_pdf_row_identity_rejects_neighbor_y_band():
+    from goldset_generator.table_gold_generator import pdf_row_identity_matches
+    from ingestion.table_recovery import WordToken
+
+    page_width = 694.8
+    words = [
+        WordToken("46", 594.2, 332.2, 602.4, 344.9, 51),
+        WordToken("01", 315.5, 332.8, 323.8, 345.5, 51),
+        WordToken("/0", 308.7, 332.8, 315.5, 345.5, 51),
+    ]
+    assert pdf_row_identity_matches(words, page_width, 327.2, 349.9, 46)
+    assert not pdf_row_identity_matches(words, page_width, 327.2, 349.9, 48)
+    assert not pdf_row_identity_matches(words, page_width, 327.2, 349.9, None)
+
+
+def test_unique_pdf_row_number_relocates_y_span():
+    from goldset_generator.table_gold_generator import pdf_unique_row_number_y_span
+    from ingestion.table_recovery import WordToken, recover_stel_twa_from_words
+    from pipeline_contracts.numeric_integrity import parse_numeric_cell
+
+    page_width = 694.8
+    words = [
+        WordToken("46", 594.2, 332.2, 602.4, 344.9, 51),
+        WordToken("01", 315.5, 332.8, 323.8, 345.5, 51),
+        WordToken("/0", 308.7, 332.8, 315.5, 345.5, 51),
+        WordToken("48", 594.2, 397.0, 602.4, 409.8, 51),
+        WordToken("1/0", 314.0, 398.5, 324.5, 411.2, 51),
+        WordToken("mg/m", 323.7, 395.5, 347.0, 406.6, 51),
+        WordToken("-", 261.8, 398.5, 266.0, 411.2, 51),
+    ]
+    neighbor_span = pdf_unique_row_number_y_span(words, page_width, 48)
+    assert neighbor_span is not None
+    recovered = recover_stel_twa_from_words(words, page_width, neighbor_span[0], neighbor_span[1])
+    twa = parse_numeric_cell(recovered["TWA"] or "", field_type="TWA")
+    assert twa.normalized_value == "0.1"
+    assert pdf_unique_row_number_y_span(words, page_width, 47) is None
+    duplicated = words + [WordToken("48", 594.2, 450.0, 602.4, 462.8, 51)]
+    assert pdf_unique_row_number_y_span(duplicated, page_width, 48) is None
+    assert pdf_unique_row_number_y_span(words, page_width, None) is None
+
+
+def test_unreadable_stel_in_neighbor_band_uses_row_number_anchor():
+    from goldset_generator.table_gold_generator import pdf_unique_row_number_y_span
+    from ingestion.table_recovery import WordToken, recover_stel_twa_from_words
+    from pipeline_contracts.numeric_integrity import parse_numeric_cell
+
+    page_width = 694.8
+    words = [
+        WordToken("63", 594.2, 360.8, 602.4, 373.5, 53),
+        WordToken("5/0", 310.5, 361.5, 321.0, 374.2, 53),
+        WordToken("62", 594.2, 325.6, 602.4, 338.4, 53),
+        WordToken("-", 261.8, 326.5, 266.0, 339.2, 53),
+        WordToken("10", 314.0, 326.5, 324.0, 339.2, 53),
+        WordToken("mg/m", 325.0, 323.5, 348.0, 334.6, 53),
+    ]
+    span = pdf_unique_row_number_y_span(words, page_width, 62)
+    assert span is not None
+    recovered = recover_stel_twa_from_words(words, page_width, span[0], span[1])
+    twa = parse_numeric_cell(recovered["TWA"] or "", field_type="TWA")
+    assert twa.normalized_value == "10"
+    assert recovered["STEL"] is not None and recovered["STEL"].strip() in {"-", "—", "–"}
+
+
+def test_pdf_overrides_dai_only_when_same_numbers_are_column_swapped():
+    from decimal import Decimal
+
+    from goldset_generator.table_gold_generator import pdf_overrides_complete_dai_limits
+
+    assert pdf_overrides_complete_dai_limits(
+        Decimal("20"), Decimal("40"), Decimal("40"), Decimal("20")
+    )
+    assert not pdf_overrides_complete_dai_limits(
+        Decimal("2"), Decimal("6"), None, Decimal("0.5")
+    )
+    assert not pdf_overrides_complete_dai_limits(
+        Decimal("2"), Decimal("1"), Decimal("0.2"), Decimal("0.1")
+    )
+    assert pdf_overrides_complete_dai_limits(None, Decimal("1"), Decimal("2"), Decimal("1"))

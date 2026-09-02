@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from pathlib import Path
 from typing import Any
 
 from goldset_generator.chemical_entity_extractor import (
@@ -27,6 +28,12 @@ from pipeline_contracts.table_quality_gate import evaluate_table_quality
 
 from goldset_generator.header_mapping import analyze_header_mapping
 from goldset_generator.validator import GoldsetValidator
+
+_EMPTY_LIMIT = frozenset({"", "-", "—", "–"})
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+_MAX_PDF_ROW_BAND = 32.0
+_PDF_Y_PAD = 5.0
+_PDF_ROW_ANCHOR_Y_PAD = 8.0
 
 CAS_PATTERN = re.compile(r"\[(\d{2,7}-\d{2}-\d)\s*\]")
 CAS_STRIP = re.compile(r"\[\d{2,7}-\d{2}-\d\]")
@@ -233,6 +240,11 @@ def _parse_combined_exposure_values(
     return parsed, has_unparsed_segment
 
 
+def _parse_limits(text: str) -> tuple[str | None, str | None]:
+    """Parse numeric value and unit only. Does not assign STEL vs TWA vs MW."""
+    return _parse_exposure_value(text)
+
+
 def _looks_like_symbol(text: str) -> bool:
     compact = re.sub(r"\s+", " ", (text or "").strip())
     if not compact:
@@ -252,8 +264,12 @@ def _field_from_cell(
     use_content_heuristics: bool = True,
 ) -> str:
     if column_index in header_mapping:
-        return header_mapping[column_index]
+        mapped = header_mapping[column_index]
+        if mapped and not mapped.startswith("column_"):
+            return mapped
     resolved = resolve_field_name(column_index, column_name, header_mapping)
+    if resolved in {"STEL", "TWA", "TWA_STEL", "molecular_weight", "ceiling"}:
+        return resolved
     if not use_content_heuristics or not text:
         return resolved
     if ROW_PERSIAN_PATTERN.match(text):
@@ -435,7 +451,449 @@ def _apply_chemical_entity(
         )
 
 
+def _valid_xywh(bbox: Any) -> tuple[float, float, float, float] | None:
+    if not isinstance(bbox, dict):
+        return None
+    try:
+        x = float(bbox["x"])
+        y = float(bbox["y"])
+        width = float(bbox.get("width") or 0)
+        height = float(bbox.get("height") or 0)
+    except (KeyError, TypeError, ValueError):
+        return None
+    if width <= 0 or height <= 0:
+        return None
+    return x, y, width, height
+
+
+def _bbox_iou(
+    a: tuple[float, float, float, float],
+    b: tuple[float, float, float, float],
+) -> float:
+    ax, ay, aw, ah = a
+    bx, by, bw, bh = b
+    ix = max(0.0, min(ax + aw, bx + bw) - max(ax, bx))
+    iy = max(0.0, min(ay + ah, by + bh) - max(ay, by))
+    inter = ix * iy
+    union = aw * ah + bw * bh - inter
+    if union <= 0:
+        return 0.0
+    return inter / union
+
+
+def _bboxes_cloned(
+    a: tuple[float, float, float, float],
+    b: tuple[float, float, float, float],
+) -> bool:
+    if all(abs(a[i] - b[i]) <= 1.0 for i in range(4)):
+        return True
+    return _bbox_iou(a, b) >= 0.8
+
+
+def _bbox_spans_stel_and_twa(
+    box: tuple[float, float, float, float],
+    page_width: float,
+) -> bool:
+    """True when one physical cell covers both STEL (col 2) and TWA (col 3) x-bands."""
+    from ingestion.table_recovery import _column_boundaries
+
+    bounds = _column_boundaries(page_width)
+    split_x = bounds[2]
+    x, _, width, _ = box
+    return x < split_x - 8.0 and (x + width) > split_x + 8.0
+
+
+def _cells_by_column(row: list[Any]) -> dict[int, dict[str, Any]]:
+    by_col: dict[int, dict[str, Any]] = {}
+    for cell in row:
+        if not isinstance(cell, dict) or cell.get("column") is None:
+            continue
+        by_col[int(cell["column"])] = cell
+    return by_col
+
+
+def _limit_text_unreadable(text: str) -> bool:
+    compact = (text or "").strip()
+    if not compact or compact in _EMPTY_LIMIT:
+        return False
+    if LATEX_ARTIFACT_PATTERN.search(compact):
+        return True
+    numeric = parse_numeric_cell(compact, field_type="STEL")
+    if numeric.parsed_token:
+        return False
+    return bool(LIMIT_MARKERS.search(compact) or "~" in compact or "mg/m" in compact.lower())
+
+
+def _physical_column_of_bbox(
+    box: tuple[float, float, float, float],
+    page_width: float,
+) -> int:
+    from ingestion.table_recovery import _assign_column_by_boundary
+
+    x, _, width, _ = box
+    return _assign_column_by_boundary(x + width / 2, page_width)
+
+
+def _decimal_token(text: str | None, field_type: str) -> Any:
+    compact = (text or "").strip()
+    if not compact or compact in _EMPTY_LIMIT:
+        return None
+    numeric = parse_numeric_cell(compact, field_type=field_type)
+    value = numeric.normalized_value if numeric.normalized_value is not None else numeric.parsed_token
+    if value is None:
+        return None
+    try:
+        from decimal import Decimal, InvalidOperation
+
+        return Decimal(str(value))
+    except (InvalidOperation, ValueError):
+        return str(value)
+
+
+def pdf_overrides_complete_dai_limits(
+    dai_stel: Any,
+    dai_twa: Any,
+    pdf_stel: Any,
+    pdf_twa: Any,
+) -> bool:
+    """True only when PDF x-bands are a column-swap of the same two DAI numbers.
+
+    If Document AI already parsed both limits, incomplete or different PDF
+    numbers must not replace them (cloned bboxes often sit in one column).
+    """
+    if dai_stel is None or dai_twa is None:
+        return True
+    if pdf_stel is None or pdf_twa is None:
+        return False
+    return {dai_stel, dai_twa} == {pdf_stel, pdf_twa} and (pdf_stel, pdf_twa) != (dai_stel, dai_twa)
+
+
+def pdf_geometry_untrusted_fields(row: list[Any], page_width: float) -> set[str]:
+    """STEL/TWA untrusted from limit-cell geometry (cloned, spanned, wrong x-band, OCR)."""
+    by_col = _cells_by_column(row)
+    cell_stel = by_col.get(2)
+    cell_twa = by_col.get(3)
+    text_stel = ((cell_stel or {}).get("text") or "").strip()
+    text_twa = ((cell_twa or {}).get("text") or "").strip()
+    box_stel = _valid_xywh((cell_stel or {}).get("bbox"))
+    box_twa = _valid_xywh((cell_twa or {}).get("bbox"))
+    empty_stel = text_stel in _EMPTY_LIMIT
+    empty_twa = text_twa in _EMPTY_LIMIT
+    fields: set[str] = set()
+
+    if (
+        box_stel
+        and box_twa
+        and not empty_stel
+        and not empty_twa
+        and _bboxes_cloned(box_stel, box_twa)
+    ):
+        fields.update({"STEL", "TWA"})
+
+    if box_stel and _bbox_spans_stel_and_twa(box_stel, page_width):
+        fields.update({"STEL", "TWA"})
+    if box_twa and _bbox_spans_stel_and_twa(box_twa, page_width):
+        fields.update({"STEL", "TWA"})
+
+    if box_stel and _physical_column_of_bbox(box_stel, page_width) == 3:
+        fields.update({"STEL", "TWA"})
+
+    if _limit_text_unreadable(text_stel) or _limit_text_unreadable(text_twa):
+        fields.update({"STEL", "TWA"})
+
+    return fields
+
+
+def pdf_identity_fill_fields(row: list[Any], page_width: float) -> set[str]:
+    """Fill STEL/TWA from PDF only when this row's y-band identity can be proven."""
+    by_col = _cells_by_column(row)
+    cell_stel = by_col.get(2)
+    cell_twa = by_col.get(3)
+    text_stel = ((cell_stel or {}).get("text") or "").strip()
+    text_twa = ((cell_twa or {}).get("text") or "").strip()
+    box_stel = _valid_xywh((cell_stel or {}).get("bbox"))
+    box_twa = _valid_xywh((cell_twa or {}).get("bbox"))
+    empty_stel = text_stel in _EMPTY_LIMIT
+    empty_twa = text_twa in _EMPTY_LIMIT
+    fields: set[str] = set()
+    if empty_stel and empty_twa:
+        fields.update({"STEL", "TWA"})
+    if box_stel and _physical_column_of_bbox(box_stel, page_width) == 4:
+        fields.update({"STEL", "TWA"})
+    if box_twa and _physical_column_of_bbox(box_twa, page_width) == 4:
+        fields.update({"STEL", "TWA"})
+    return fields
+
+
+def pdf_limit_replace_fields(row: list[Any], page_width: float) -> set[str]:
+    """Fields whose DAI STEL/TWA assignment is geometrically untrusted.
+
+    Does not look at Gold. Triggers are physical: cloned merged-cell bboxes,
+    a bbox that spans both limit columns, a STEL cell whose x-center sits in
+    the TWA band, a limit bbox parked in the MW x-band, both limit cells empty,
+    or unreadable OCR in a limit cell.
+    """
+    return pdf_geometry_untrusted_fields(row, page_width) | pdf_identity_fill_fields(
+        row, page_width
+    )
+
+
+def pdf_row_identity_matches(
+    words: list[Any],
+    page_width: float,
+    y_min: float,
+    y_max: float,
+    row_number: int | None,
+) -> bool:
+    """True when the y-band contains exactly this row's PDF row-number token."""
+    from ingestion.table_recovery import _assign_column_by_boundary, _is_header_word
+
+    if row_number is None:
+        return False
+    found: set[int] = set()
+    for word in words:
+        if not (y_min <= word.y_center <= y_max):
+            continue
+        if _is_header_word(word):
+            continue
+        if _assign_column_by_boundary(word.x_center, page_width) != 6:
+            continue
+        parsed = parse_numeric_cell(word.text, field_type="row_number")
+        token = parsed.normalized_value or parsed.parsed_token
+        if not token:
+            continue
+        try:
+            found.add(int(float(token)))
+        except (TypeError, ValueError):
+            continue
+    return found == {row_number}
+
+
+def pdf_unique_row_number_y_span(
+    words: list[Any],
+    page_width: float,
+    row_number: int | None,
+) -> tuple[float, float] | None:
+    """Tight y-span around the unique PDF row-number token in column 6.
+
+    Used when the DAI-derived limit band sits on a neighbor row. Duplicate
+    or missing row-number glyphs are refused so a neighbor is never guessed.
+    """
+    from ingestion.table_recovery import _assign_column_by_boundary, _is_header_word
+
+    if row_number is None:
+        return None
+    matches: list[Any] = []
+    for word in words:
+        if _is_header_word(word):
+            continue
+        if _assign_column_by_boundary(word.x_center, page_width) != 6:
+            continue
+        parsed = parse_numeric_cell(word.text, field_type="row_number")
+        token = parsed.normalized_value or parsed.parsed_token
+        if not token:
+            continue
+        try:
+            if int(float(token)) != row_number:
+                continue
+        except (TypeError, ValueError):
+            continue
+        matches.append(word)
+    if len(matches) != 1:
+        return None
+    word = matches[0]
+    y_min = word.y0 - _PDF_ROW_ANCHOR_Y_PAD
+    y_max = word.y1 + _PDF_ROW_ANCHOR_Y_PAD
+    if y_max - y_min > _MAX_PDF_ROW_BAND:
+        return None
+    return y_min, y_max
+
+
+def _row_limit_y_band(row: list[Any], page_width: float) -> tuple[float, float] | None:
+    """Vertical band for STEL/TWA words: limit cells, then MW/row-number x-bands."""
+    from ingestion.table_recovery import _assign_column_by_boundary
+
+    limit_spans: list[tuple[float, float]] = []
+    mw_spans: list[tuple[float, float]] = []
+    rownum_spans: list[tuple[float, float]] = []
+    name_spans: list[tuple[float, float]] = []
+    for cell in row:
+        if not isinstance(cell, dict):
+            continue
+        box = _valid_xywh(cell.get("bbox"))
+        if not box:
+            continue
+        x, y, width, height = box
+        x_center = x + width / 2
+        column = cell.get("column")
+        geom_col = _assign_column_by_boundary(x_center, page_width)
+        span = (y, y + height)
+        if column in {2, 3}:
+            limit_spans.append(span)
+        elif column == 4 and geom_col == 4:
+            mw_spans.append(span)
+        elif column == 6 and geom_col == 6:
+            rownum_spans.append(span)
+        elif column == 5 and geom_col == 5:
+            name_spans.append(span)
+    use = limit_spans or mw_spans or rownum_spans or name_spans
+    if not use:
+        return None
+    y_min = min(item[0] for item in use) - _PDF_Y_PAD
+    y_max = max(item[1] for item in use) + _PDF_Y_PAD
+    if y_max - y_min > _MAX_PDF_ROW_BAND:
+        use = limit_spans or mw_spans or rownum_spans
+        if not use:
+            return None
+        y_min = min(item[0] for item in use) - _PDF_Y_PAD
+        y_max = max(item[1] for item in use) + _PDF_Y_PAD
+    if y_max - y_min > _MAX_PDF_ROW_BAND:
+        return None
+    return y_min, y_max
+
+
 class TableGoldGenerator:
+    def __init__(self, pdf_path: Path | str | None = None) -> None:
+        self._pdf_path = Path(pdf_path) if pdf_path else None
+        self._pdf_doc: Any = None
+        self._pdf_unavailable = False
+
+    def _pdf_page(self, page_number: int) -> Any:
+        if self._pdf_unavailable or not page_number:
+            return None
+        if self._pdf_path is None:
+            candidate = _REPO_ROOT / "OHE6.pdf"
+            if not candidate.exists():
+                self._pdf_unavailable = True
+                return None
+            self._pdf_path = candidate
+        try:
+            import fitz
+        except ImportError:
+            self._pdf_unavailable = True
+            return None
+        try:
+            if self._pdf_doc is None:
+                self._pdf_doc = fitz.open(self._pdf_path)
+            if page_number < 1 or page_number > len(self._pdf_doc):
+                return None
+            return self._pdf_doc[page_number - 1]
+        except Exception:
+            self._pdf_unavailable = True
+            return None
+
+    def _overlay_pdf_stel_twa(
+        self,
+        row_data: dict[str, Any],
+        table: dict[str, Any],
+        row: list[Any],
+    ) -> None:
+        page = self._pdf_page(int(table.get("page_number") or 0))
+        if page is None:
+            return
+        stel_meta = row_data.get("STEL") or {}
+        twa_meta = row_data.get("TWA") or {}
+        if stel_meta.get("cell_id") and stel_meta.get("cell_id") == twa_meta.get("cell_id"):
+            return
+        page_width = float(page.rect.width)
+        geometry_replace = pdf_geometry_untrusted_fields(row, page_width)
+        identity_replace = pdf_identity_fill_fields(row, page_width)
+        replace = geometry_replace | identity_replace
+        if not replace:
+            return
+        from ingestion.table_recovery import WordToken, recover_stel_twa_from_words
+
+        page_number = int(table.get("page_number") or 0)
+        words = [
+            WordToken(
+                text=str(item[4]),
+                x0=float(item[0]),
+                y0=float(item[1]),
+                x1=float(item[2]),
+                y1=float(item[3]),
+                page_number=page_number,
+            )
+            for item in page.get_text("words")
+            if len(item) >= 5
+        ]
+        row_no_meta = row_data.get("row_number") or {}
+        row_no_token = row_no_meta.get("value") or row_no_meta.get("original_value")
+        row_no: int | None = None
+        if row_no_token is not None:
+            try:
+                row_no = int(float(str(row_no_token).strip().replace(",", "")))
+            except (TypeError, ValueError):
+                row_no = None
+        dai_stel = _decimal_token(
+            (row_data.get("STEL") or {}).get("value")
+            or (row_data.get("STEL") or {}).get("original_value"),
+            "STEL",
+        )
+        dai_twa = _decimal_token(
+            (row_data.get("TWA") or {}).get("value")
+            or (row_data.get("TWA") or {}).get("original_value"),
+            "TWA",
+        )
+        dai_complete = dai_stel is not None and dai_twa is not None
+        band = _row_limit_y_band(row, page_width)
+        identity_ok = bool(band) and pdf_row_identity_matches(
+            words, page_width, band[0], band[1], row_no
+        )
+        if not identity_ok:
+            anchored = pdf_unique_row_number_y_span(words, page_width, row_no)
+            if anchored is not None and (identity_replace or not dai_complete):
+                band = anchored
+            elif band is None or not geometry_replace or dai_complete:
+                return
+            else:
+                replace = geometry_replace
+        recovered = recover_stel_twa_from_words(words, page_width, band[0], band[1])
+        pdf_stel = _decimal_token(recovered.get("STEL"), "STEL")
+        pdf_twa = _decimal_token(recovered.get("TWA"), "TWA")
+        if dai_complete:
+            if not pdf_overrides_complete_dai_limits(dai_stel, dai_twa, pdf_stel, pdf_twa):
+                return
+        for field in ("STEL", "TWA"):
+            if field not in replace:
+                continue
+            raw = recovered.get(field)
+            if raw is None:
+                continue
+            source_cell = {
+                "text": raw,
+                "bbox": None,
+                "cell_id": None,
+                "source_reference": {"geometry_source": "pymupdf_column_band"},
+            }
+            if raw.strip() in _EMPTY_LIMIT:
+                row_data[field] = _field_payload(
+                    table,
+                    source_cell,
+                    field,
+                    value=None,
+                    value_status="absent",
+                )
+                continue
+            numeric = parse_numeric_cell(raw, field_type=field)
+            if numeric.parsed_token:
+                row_data[field] = _field_payload(
+                    table,
+                    source_cell,
+                    field,
+                    value=numeric.parsed_token,
+                    unit=numeric.unit,
+                    value_status="extracted",
+                    numeric_result=numeric,
+                )
+            else:
+                row_data[field] = _field_payload(
+                    table,
+                    source_cell,
+                    field,
+                    value=None,
+                    value_status="absent" if not raw.strip() else "extraction_uncertain",
+                )
+
     def generate(self, table: dict[str, Any]) -> dict[str, Any]:
         rows = table.get("rows") or []
         if not rows:
@@ -493,6 +951,8 @@ class TableGoldGenerator:
                     continue
 
                 if field == "TWA_STEL":
+                    # Merged exposure cell: positional STEL-then-TWA is the fallback
+                    # because column identity cannot separate the two limits.
                     parsed_limits, has_unparsed_segment = _parse_combined_exposure_values(text)
                     for limit_field in ("TWA", "STEL"):
                         value, unit = parsed_limits.get(limit_field, (None, None))
@@ -722,13 +1182,16 @@ class TableGoldGenerator:
                     )
                     continue
 
-                val, unit = _parse_exposure_value(text)
+                val, unit = _parse_limits(text)
                 status = "extracted" if val else "extraction_uncertain"
                 _set_field(
                     row_data,
                     field,
                     _field_payload(table, cell, field, value=val or text, unit=unit, value_status=status),
                 )
+
+            if row_data and table.get("table_type") == "chemical_oel":
+                self._overlay_pdf_stel_twa(row_data, table, row)
 
             if row_data:
                 gold_rows.append(row_data)

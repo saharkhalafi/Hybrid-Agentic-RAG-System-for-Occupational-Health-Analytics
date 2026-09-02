@@ -70,6 +70,41 @@ def test_numeric_preservation_slash_original():
     assert result.numeric_parse_method == "deterministic_persian_decimal"
 
 
+def test_twa_rtl_slash_uses_normalized_value():
+    result = parse_numeric_cell("(R) ³ mg/m\n05 /0", field_type="TWA")
+    assert result.normalized_value == "0.05"
+
+    result = parse_numeric_cell("mg/m³ 0000051 /0", field_type="TWA")
+    assert result.normalized_value == "0.0000051"
+
+
+def test_twa_ignores_cubic_metre_exponent_when_another_number_exists():
+    result = parse_numeric_cell("3\nmg/m\n5", field_type="TWA")
+    assert result.parsed_token == "5"
+    assert result.normalized_value == "5"
+
+    result = parse_numeric_cell("(IFV) 3 mg/m\n1", field_type="TWA")
+    assert result.parsed_token == "1"
+    assert result.normalized_value == "1"
+
+
+def test_twa_keeps_lone_three_when_it_is_the_limit():
+    result = parse_numeric_cell("3 mg/m³", field_type="TWA")
+    assert result.parsed_token == "3"
+    assert result.normalized_value == "3"
+
+    result = parse_numeric_cell("3 mg/m3", field_type="STEL")
+    assert result.parsed_token == "3"
+    assert result.normalized_value == "3"
+
+
+def test_limit_unit_only_mg_m3_is_not_an_exposure_value():
+    for text in ("mg/m3", "mg/m^{3}", "mg/m3 (I)(E)"):
+        result = parse_numeric_cell(text, field_type="STEL")
+        assert result.parsed_token is None, text
+        assert result.normalized_value is None, text
+
+
 def test_ceiling_extracted_from_stel_c_cell():
     text = "3 ppm\nC 0/05 ppm"
     assert extract_ceiling_from_stel_c_cell(text) == "C 0/05 ppm"

@@ -147,17 +147,44 @@ def extract_persian_from_row_number(text: str | None, *, index: int = 0) -> str 
     return persian if _looks_like_persian_name(persian) else persian if len(persian) >= 4 else None
 
 
+def _is_rtl_reversed_mw(left: str, right: str) -> bool:
+    """True for visual RTL MW tokens: fraction / integer (08/71, 14/146)."""
+    if len(right) > len(left):
+        return True
+    return (
+        len(left) <= 2
+        and left.startswith("0")
+        and not right.startswith("0")
+        and len(right) >= 2
+    )
+
+
 def parse_molecular_weight(text: str) -> str | None:
     """Parse OHE6-style molecular weight tokens like 10/85 -> 85.10."""
     match = MOL_WEIGHT_PATTERN.search(_normalize_digits(text))
     if not match:
         return None
     left, right = match.groups()
+    if _is_rtl_reversed_mw(left, right):
+        return f"{right}.{left}"
+    if len(right) == 2 and right.startswith("0"):
+        return f"{left}.{right}"
     if len(left) <= 2 and len(right) >= 2:
         return f"{right}.{left}"
     if len(right) <= 2:
         return f"{left}.{right}"
     return f"{right}.{left}"
+
+
+def parse_layer2_molecular_weight(text: str) -> str | None:
+    """Parse a Layer-2 MW cell. Reverse only clearly RTL frac/integer slashes."""
+    match = MOL_WEIGHT_PATTERN.search(_normalize_digits(text))
+    if not match:
+        return None
+    left, right = match.groups()
+    if _is_rtl_reversed_mw(left, right):
+        return f"{right}.{left}"
+    return None
 
 
 def _parse_slash_decimal(numerator: str, denominator: str) -> str | None:
@@ -272,7 +299,12 @@ def _strip_molecular_weight_token(segment: str) -> str:
     return segment[:start] + segment[end:]
 
 
-def _parse_limits(segment: str, *, full_segment: str | None = None) -> dict[str, Any]:
+def _parse_limits(
+    segment: str,
+    *,
+    full_segment: str | None = None,
+    field: str | None = None,
+) -> dict[str, Any]:
     segment = _normalize_digits(segment)
     full_text = _normalize_digits(full_segment or segment)
     segment = _strip_molecular_weight_token(segment)
@@ -402,6 +434,32 @@ def _parse_limits(segment: str, *, full_segment: str | None = None) -> dict[str,
             result["TWA"] = None
             result["TWA_unit"] = None
 
+    if field in {"STEL", "TWA", "ceiling"}:
+        primary_val = result.get(field)
+        primary_unit = result.get(f"{field}_unit")
+        if not primary_val and cleaned_pairs:
+            primary_val, primary_unit = cleaned_pairs[0]
+        if not primary_val:
+            fallback = result.get("TWA") or result.get("STEL")
+            fallback_unit = result.get("TWA_unit") if result.get("TWA") else result.get("STEL_unit")
+            primary_val = fallback
+            primary_unit = fallback_unit
+        ceiling_val = result.get("ceiling")
+        ceiling_unit = result.get("ceiling_unit")
+        result = {
+            "TWA": None,
+            "TWA_unit": None,
+            "STEL": None,
+            "STEL_unit": None,
+            "ceiling": None,
+            "ceiling_unit": None,
+        }
+        result[field] = primary_val
+        result[f"{field}_unit"] = primary_unit
+        if field == "STEL" and ceiling_val:
+            result["ceiling"] = ceiling_val
+            result["ceiling_unit"] = ceiling_unit
+
     return result
 
 
@@ -462,14 +520,18 @@ def split_chemical_segments(text: str) -> list[dict[str, Any]]:
 
 
 def resolve_field_name(column_index: int, column_name: str | None, header_mapping: dict[int, str]) -> str:
-    if column_name and column_name in STANDARD_OEL_COLUMN_MAP.values():
-        return column_name
+    """Resolve semantic field. Valid header_mapping always beats positional fallback."""
     if column_index in header_mapping:
         mapped = header_mapping[column_index]
-        if mapped.startswith("column_"):
-            return STANDARD_OEL_COLUMN_MAP.get(column_index, mapped)
-        return mapped
-    return STANDARD_OEL_COLUMN_MAP.get(column_index, f"column_{column_index}")
+        if mapped and not mapped.startswith("column_"):
+            return mapped
+    if column_name and column_name in STANDARD_OEL_COLUMN_MAP.values():
+        return column_name
+    if column_index in STANDARD_OEL_COLUMN_MAP:
+        return STANDARD_OEL_COLUMN_MAP[column_index]
+    if column_index in header_mapping:
+        return header_mapping[column_index]
+    return f"column_{column_index}"
 
 
 def _is_row_number_value(text: str) -> bool:

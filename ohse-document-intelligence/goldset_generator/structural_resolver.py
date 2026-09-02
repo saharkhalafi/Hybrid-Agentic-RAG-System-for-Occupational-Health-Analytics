@@ -191,6 +191,7 @@ from validation.structural_confidence import (
 )
 from ingestion.merged_row_splitter import (
     extract_cas_geometry,
+    repair_oel_numeric_from_pdf_headers,
     split_table_rows_by_cas_geometry,
 )
 
@@ -2218,15 +2219,12 @@ def _split_oel_multi_cas_rows(
         )
         return table, 0
 
-    if split_count <= 0:
+    if not corrected_rows:
         return table, 0
 
-    # --------------------------------------------------------------
-    # Re-index ONLY the structural coordinates.
-    #
-    # Never create new evidence here.
-    # Never modify numeric content here.
-    # --------------------------------------------------------------
+    # Always keep splitter output: PDF STEL/TWA/MW reconstruction
+    # runs for unsplit rows as well. split_count only counts extra
+    # physical rows created from multi-CAS geometry.
 
     final_rows: list[list[ExtractedCellRecord]] = []
 
@@ -2239,7 +2237,11 @@ def _split_oel_multi_cas_rows(
             new_cell = copy.deepcopy(cell)
 
             new_cell.row = row_index
-            new_cell.column = column_index
+            original_column = getattr(cell, "column", None)
+            if original_column is not None:
+                new_cell.column = int(original_column)
+            else:
+                new_cell.column = column_index
 
             previous_reference = (
                 new_cell.source_reference or {}
@@ -2247,10 +2249,15 @@ def _split_oel_multi_cas_rows(
 
             new_cell.source_reference = {
                 **previous_reference,
-                "multi_cas_visual_row_split": True,
-                "split_basis": "pymupdf_cas_y_geometry",
-                "cas_y_threshold": 8.0,
             }
+            if split_count > 0:
+                new_cell.source_reference.update(
+                    {
+                        "multi_cas_visual_row_split": True,
+                        "split_basis": "pymupdf_cas_y_geometry",
+                        "cas_y_threshold": 8.0,
+                    }
+                )
 
             final_row.append(new_cell)
 
@@ -2268,14 +2275,15 @@ def _split_oel_multi_cas_rows(
         bbox=table.bbox,
     )
 
-    logger.info(
-        "oel_multi_cas_visual_rows_split",
-        table_id=str(table.table_id),
-        page_number=table.page_number,
-        split_count=split_count,
-        original_row_count=len(table.rows),
-        corrected_row_count=len(final_rows),
-    )
+    if split_count:
+        logger.info(
+            "oel_multi_cas_visual_rows_split",
+            table_id=str(table.table_id),
+            page_number=table.page_number,
+            split_count=split_count,
+            original_row_count=len(table.rows),
+            corrected_row_count=len(final_rows),
+        )
 
     return corrected_table, split_count
 
@@ -3038,6 +3046,22 @@ def _recovered_to_records(
     )
 
 
+def _apply_recovered_oel_structure(
+    table: ExtractedTableRecord,
+    pdf_page,
+    page_text: str,
+) -> tuple[ExtractedTableRecord, int]:
+    """Run the same OEL geometry/numeric repair used for Document AI tables."""
+    if pdf_page is None:
+        return table, 0
+    if not _is_chemical_oel_table(table, page_text):
+        return table, 0
+    table, split_count = _split_oel_multi_cas_rows(table, pdf_page)
+    table, _ = _reconstruct_oel_logical_rows(table)
+    table.rows = repair_oel_numeric_from_pdf_headers(table.rows, pdf_page)
+    return table, split_count
+
+
 # ============================================================================
 # OEL DIAGNOSTIC ATTACHMENT
 # ============================================================================
@@ -3346,6 +3370,19 @@ def resolve_structure(
                             tid,
                         )
 
+                        (
+                            table_record,
+                            recovered_split_count,
+                        ) = _apply_recovered_oel_structure(
+                            table_record,
+                            pdf_page,
+                            page_text,
+                        )
+                        if recovered_split_count:
+                            result.multi_cas_visual_row_split_count += (
+                                recovered_split_count
+                            )
+
                         result.tables.append(
                             table_record
                         )
@@ -3642,6 +3679,12 @@ def resolve_structure(
                             + basis_symbols_expansion_count
                         )
 
+                        if pdf_page is not None:
+                            table.rows = repair_oel_numeric_from_pdf_headers(
+                                table.rows,
+                                pdf_page,
+                            )
+
                     # ========================================================
                     # 7.7 Mark merged cells
                     # ========================================================
@@ -3786,6 +3829,19 @@ def resolve_structure(
                         recovered,
                         tid,
                     )
+
+                    (
+                        table_record,
+                        recovered_split_count,
+                    ) = _apply_recovered_oel_structure(
+                        table_record,
+                        pdf_page,
+                        page_text,
+                    )
+                    if recovered_split_count:
+                        result.multi_cas_visual_row_split_count += (
+                            recovered_split_count
+                        )
 
                     result.tables.append(
                         table_record

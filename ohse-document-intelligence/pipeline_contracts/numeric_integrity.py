@@ -17,6 +17,24 @@ UNIT_PATTERN = re.compile(r"\b(ppm|mg/m³|mg/m3|f/ml)\b", re.IGNORECASE)
 NUMERIC_TOKEN = re.compile(r"[\d۰-۹]+(?:[./][\d۰-۹]+)?")
 SLASH_TOKEN = re.compile(r"[\d۰-۹]+\s*/\s*[\d۰-۹]+")
 CAS_PATTERN = re.compile(r"\[\d{2,7}-\d{2}-\d\]")
+# Incomplete mg/m (no cubic yet). A lone 3/³ beside it is the unit exponent, not the limit.
+_INCOMPLETE_MGM = re.compile(r"mg/m(?![3³^])", re.IGNORECASE)
+_RTL_CUBIC_THREE = re.compile(
+    r"(?<![\d۰-۹.])([3۳³])\s*(mg/m)(?![3³^])",
+    re.IGNORECASE,
+)
+_LTR_CUBIC_THREE = re.compile(
+    r"(mg/m)(?![3³^])\s*([3۳³])(?![\d۰-۹])",
+    re.IGNORECASE,
+)
+_MGM_CUBIC_UNIT = re.compile(
+    r"mg\s*/\s*m(?:³|3|\^\s*\{\s*3(?:\s*\([^)]*\))*\s*\}|\^\s*3)",
+    re.IGNORECASE,
+)
+_UNIT_QUALIFIER = re.compile(
+    r"\(\s*(?:I|E|R|IFV|IV|F)\s*\)",
+    re.IGNORECASE,
+)
 
 
 @dataclass
@@ -87,17 +105,44 @@ def try_normalize(token: str, *, field_type: str = "generic") -> tuple[str | Non
     return None, None
 
 
-def extract_primary_numeric_token(text: str, *, field_type: str = "generic") -> str | None:
-    """Extract the primary numeric token from cell text without reinterpretation."""
-    if not text or not text.strip():
-        return None
-
-    value_text = re.sub(
+def _collapse_latex_cubic_metre(text: str) -> str:
+    return re.sub(
         r"m\s*\^\s*\{\s*3(?:\s*\([^)]*\))*\s*\}",
         "m³",
         text,
         flags=re.IGNORECASE,
     )
+
+
+def _collapse_mg_m_unit_exponent(text: str) -> str:
+    """Treat a lone 3/³ beside incomplete ``mg/m`` as m³ when another number remains."""
+    if not _INCOMPLETE_MGM.search(text):
+        return text
+
+    for pattern in (_RTL_CUBIC_THREE, _LTR_CUBIC_THREE):
+        candidate, count = pattern.subn(r"mg/m³", text, count=1)
+        if count and NUMERIC_TOKEN.search(candidate):
+            return candidate
+    return text
+
+
+def _is_mg_m3_unit_only(text: str) -> bool:
+    """True when the cell is a cubic-metre unit (plus optional I/E-style tags) with no exposure value."""
+    if not _MGM_CUBIC_UNIT.search(text):
+        return False
+    remainder = _MGM_CUBIC_UNIT.sub(" ", text)
+    remainder = _UNIT_QUALIFIER.sub(" ", remainder)
+    if SLASH_TOKEN.search(remainder):
+        return False
+    return NUMERIC_TOKEN.search(remainder) is None
+
+
+def extract_primary_numeric_token(text: str, *, field_type: str = "generic") -> str | None:
+    """Extract the primary numeric token from cell text without reinterpretation."""
+    if not text or not text.strip():
+        return None
+
+    value_text = _collapse_latex_cubic_metre(text)
 
     if field_type == "molecular_weight":
         mw = re.search(r"(\d{1,3}|[\d۰-۹]{1,3})\s*/\s*(\d{2,4}|[\d۰-۹]{2,4})", value_text)
@@ -105,6 +150,9 @@ def extract_primary_numeric_token(text: str, *, field_type: str = "generic") -> 
             return mw.group(0).strip()
 
     if field_type in {"TWA", "STEL", "ceiling"}:
+        if _is_mg_m3_unit_only(value_text):
+            return None
+        value_text = _collapse_mg_m_unit_exponent(value_text)
         slash_tokens = SLASH_TOKEN.findall(value_text)
         if slash_tokens:
             return slash_tokens[-1]
