@@ -347,15 +347,8 @@ class IntentClassifier:
         if len(q) < 20 and re.search(r"حد|چقدر|چنده|مجاز", q):
             return self._result("CLARIFY.MISSING_CHEMICAL", 0.85, slots, trace, clarify=True)
 
-        # Weak fallback — refuse open-ended semantic when no HSE task signal is present.
-        if not re.search(
-            r"(یعنی|تعریف|چیست|چیه|توضیح|مفهوم|تفاوت|چرا|چگونه|خلاصه|بخش|فصل|"
-            r"توصیه|ممنوع|کاربرد|BEI|TWA|STEL|OEL|ppm|حد|CAS|فرمول|formula_)",
-            q,
-            re.I,
-        ):
-            return self._result("GUARDRAIL.PROFESSIONAL_JUDGMENT", 0.82, slots, trace)
-
+        # Unrecognized intent is not professional judgment. Preserve explicit
+        # GUARDRAIL.* rules above; otherwise allow document-grounded semantic retrieval.
         return self._result("SEMANTIC.EXPLANATION.CONCEPT", 0.5, slots, trace)
 
     def _clarify_intent(self, missing: list[str]) -> str:
