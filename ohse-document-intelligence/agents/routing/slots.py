@@ -18,6 +18,42 @@ AHW_PATTERN = re.compile(rf"ahw\s*_?\s*(\d+)\s*{_ASSIGN}(-?\d+(?:\.\d+)?)", re.I
 T_PATTERN = re.compile(rf"\bt\s*_?\s*(\d+)\s*{_ASSIGN}(-?\d+(?:\.\d+)?)", re.IGNORECASE)
 CHEMICAL_LATIN = re.compile(r"\b([A-Za-z][a-zA-Z0-9\-()]+(?:\s+[a-zA-Z]+)?)\b")
 NON_CHEMICAL_TOKENS = frozenset({"TWA", "STEL", "CAS", "MW", "BEI", "OEL", "CEILING", "C", "FOR"})
+# Closed class: English document / measurement / grammar labels (not chemical names).
+_LATIN_DOCUMENT_MEASUREMENT_LABELS = frozenset(
+    {
+        "number",
+        "peak",
+        "table",
+        "page",
+        "section",
+        "chapter",
+        "figure",
+        "range",
+        "value",
+        "code",
+        "type",
+        "part",
+        "unit",
+        "limit",
+        "level",
+        "index",
+        "factor",
+        "ratio",
+        "percent",
+        "formula",
+        "appendix",
+        "note",
+        "min",
+        "max",
+        "total",
+        "mean",
+        "sum",
+        "from",
+        "with",
+        "and",
+        "the",
+    }
+)
 
 OEL_KEYWORDS = {
     "twa": "TWA",
@@ -34,6 +70,42 @@ _INHERITABLE_SLOT_KEYS = frozenset({
     "concentration",
     "unit",
 })
+
+
+def _latin_token_segments(token: str) -> list[str]:
+    return [part for part in re.split(r"[\s\-_()/]+", token) if part]
+
+
+def is_non_chemical_latin_label(token: str) -> bool:
+    """True for agency acronyms and document/measurement labels, not chemical names.
+
+    Classes (not Gold-question words): all-caps ASCII acronyms of length >= 4,
+    and a closed set of English document/measurement grammar labels. Short
+    all-caps chemical abbreviations (e.g. EPN) remain eligible.
+    """
+    if not token:
+        return True
+    if token.upper() in NON_CHEMICAL_TOKENS:
+        return True
+    segments = _latin_token_segments(token) or [token]
+    for seg in segments:
+        if seg.upper() in NON_CHEMICAL_TOKENS:
+            return True
+        if seg.isascii() and seg.isalpha() and seg.isupper() and 4 <= len(seg) <= 8:
+            return True
+        if seg.lower() in _LATIN_DOCUMENT_MEASUREMENT_LABELS:
+            return True
+    return False
+
+
+def _all_caps_acronym_in_query(query: str, token: str) -> bool:
+    """True when this token appears in the query as a 4–8 letter ALL-CAPS acronym."""
+    if not token.isascii() or not token.isalpha() or not (4 <= len(token) <= 8):
+        return False
+    for match in re.finditer(rf"\b{re.escape(token)}\b", query, re.IGNORECASE):
+        if match.group(0).isupper():
+            return True
+    return False
 
 
 def is_valid_cas(cas: str) -> bool:
@@ -66,10 +138,17 @@ def extract_slots(query: str, inherited: dict[str, Any] | None = None) -> dict[s
         slots["concentration"] = float(cm.group(1))
         slots["unit"] = cm.group(2).replace("³", "3")
 
-    for key, oel in OEL_KEYWORDS.items():
-        if re.search(rf"\b{re.escape(key)}\b", q, re.IGNORECASE):
-            slots["oel_type"] = oel
-            break
+    if re.search(r"STEL\s*/\s*C|STEL-C|STEL_C", q, re.IGNORECASE):
+        slots["oel_type"] = "STEL_C"
+    else:
+        for key, oel in OEL_KEYWORDS.items():
+            if re.search(rf"\b{re.escape(key)}\b", q, re.IGNORECASE):
+                slots["oel_type"] = oel
+                break
+    if re.search(r"\bMW\b|molecular\s*weight|وزن\s*مولکول|وزن\s*ملکول", q, re.IGNORECASE):
+        slots["requested_field"] = "molecular_weight"
+    elif re.search(r"symbols|نماد|notation", q, re.IGNORECASE):
+        slots["requested_field"] = "symbols"
 
     # formula variable inputs
     ahw_inputs: dict[str, float] = {}
@@ -86,12 +165,17 @@ def extract_slots(query: str, inherited: dict[str, Any] | None = None) -> dict[s
         chem = CHEMICAL_LATIN.search(entity_query)
         if chem:
             token = chem.group(1)
-            if token.upper() not in NON_CHEMICAL_TOKENS:
+            if token.upper() not in NON_CHEMICAL_TOKENS and not is_non_chemical_latin_label(token):
                 slots["chemical_name"] = token
         if "chemical_name" not in slots:
             lowered = entity_query.lower()
             for token in re.findall(r"\b[a-z][a-z0-9\-()]+\b", lowered):
-                if token.upper() not in NON_CHEMICAL_TOKENS and len(token) >= 4:
+                if (
+                    token.upper() not in NON_CHEMICAL_TOKENS
+                    and len(token) >= 4
+                    and not is_non_chemical_latin_label(token)
+                    and not _all_caps_acronym_in_query(entity_query, token)
+                ):
                     slots["chemical_name"] = token
                     break
 

@@ -9,8 +9,8 @@ from sqlalchemy.orm import Session
 
 from retrieval.pipeline import ProductionRetrievalPipeline, RetrievalConfig, RetrievalMode
 
-# Production default: simpler path wins when offline benchmarks are statistically tied (see closure report).
-DEFAULT_RETRIEVAL_MODE = RetrievalMode.VECTOR_METADATA
+# Production default: multi-source candidates before identity-aware rerank.
+DEFAULT_RETRIEVAL_MODE = RetrievalMode.EVIDENCE_CANDIDATES
 # A/B canary experimental arm only — not the production default until canary confirms significance.
 CANARY_EXPERIMENTAL_MODE = RetrievalMode.HYBRID_RERANK
 # Fallback for the HYBRID canary arm when primary errors or returns empty with page_hint.
@@ -26,6 +26,7 @@ class SemanticAgentResult:
     latency_ms: float = 0.0
     retrieval_mode: str = ""
     retrieval_trace: list[str] = field(default_factory=list)
+    pre_rerank_candidates: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -36,6 +37,7 @@ class SemanticAgentResult:
             "latency_ms": self.latency_ms,
             "retrieval_mode": self.retrieval_mode,
             "retrieval_trace": self.retrieval_trace,
+            "pre_rerank_candidates": self.pre_rerank_candidates,
         }
 
 
@@ -67,16 +69,30 @@ class SemanticAgent:
         else:
             self.pipeline = None
 
-    def execute(self, query: str, *, page_hint: int | None = None) -> SemanticAgentResult:
+    def execute(
+        self,
+        query: str,
+        *,
+        page_hint: int | None = None,
+        slots: dict[str, Any] | None = None,
+    ) -> SemanticAgentResult:
         try:
             if self.use_isolated_session:
-                return self._execute_isolated(query, page_hint=page_hint)
+                return self._execute_isolated(query, page_hint=page_hint, slots=slots)
             assert self.pipeline is not None
-            return self._retrieve_with_fallback(self.pipeline, query, page_hint=page_hint)
+            return self._retrieve_with_fallback(
+                self.pipeline, query, page_hint=page_hint, slots=slots
+            )
         except Exception as exc:
             return SemanticAgentResult(success=False, error=str(exc))
 
-    def _execute_isolated(self, query: str, *, page_hint: int | None = None) -> SemanticAgentResult:
+    def _execute_isolated(
+        self,
+        query: str,
+        *,
+        page_hint: int | None = None,
+        slots: dict[str, Any] | None = None,
+    ) -> SemanticAgentResult:
         from database.session import SessionLocal
         from persistence.semantic_store import embed_query_vector
 
@@ -97,6 +113,7 @@ class SemanticAgent:
                 query,
                 page_hint=page_hint,
                 query_vector=query_vector,
+                slots=slots,
             )
         finally:
             db.close()
@@ -108,6 +125,7 @@ class SemanticAgent:
         *,
         page_hint: int | None = None,
         query_vector: list[float] | None = None,
+        slots: dict[str, Any] | None = None,
     ) -> SemanticAgentResult:
         """Optional fallback when primary mode errors or returns empty with page_hint.
 
@@ -115,12 +133,16 @@ class SemanticAgent:
         canary arm may set fallback_mode=VECTOR_METADATA explicitly.
         """
         if self.fallback_mode is None or self.fallback_mode == self.retrieval_mode:
-            result = pipeline.retrieve(query, page_hint=page_hint, query_vector=query_vector)
+            result = pipeline.retrieve(
+                query, page_hint=page_hint, query_vector=query_vector, slots=slots
+            )
             return self._to_result(result)
 
         fallback_reason: str | None = None
         try:
-            result = pipeline.retrieve(query, page_hint=page_hint, query_vector=query_vector)
+            result = pipeline.retrieve(
+                query, page_hint=page_hint, query_vector=query_vector, slots=slots
+            )
         except Exception as exc:
             if self.retrieval_mode == self.fallback_mode:
                 raise
@@ -148,6 +170,7 @@ class SemanticAgent:
                 query,
                 page_hint=page_hint,
                 query_vector=query_vector,
+                slots=slots,
             )
             agent_result = self._to_result(result)
             agent_result.retrieval_trace = [
@@ -165,7 +188,10 @@ class SemanticAgent:
             {
                 "source_type": "semantic_text",
                 "chunk_id": r.get("chunk_id"),
-                "page_number": r.get("page_number"),
+                "page_number": r.get("document_page")
+                if r.get("document_page") is not None
+                else r.get("page_number"),
+                "printed_page_number": r.get("printed_page_number"),
                 "section_title": r.get("section_title"),
                 "score": r.get("score"),
                 "authority": "semantic",
@@ -179,4 +205,5 @@ class SemanticAgent:
             latency_ms=result.latency_ms,
             retrieval_mode=result.mode,
             retrieval_trace=result.trace,
+            pre_rerank_candidates=list(getattr(result, "pre_rerank_candidates", []) or []),
         )

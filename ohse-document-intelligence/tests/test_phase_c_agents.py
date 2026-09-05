@@ -147,6 +147,32 @@ class TestStructuredAgentMock:
         assert res.success
         assert res.data["value"] == 0.5
 
+    def test_mw_lookup_propagates_oel_provenance(self):
+        from agents.structured.agent import StructuredAgent
+
+        store = MagicMock()
+        store.resolve_molecular_weight.return_value = {
+            "molecular_weight": 87.12,
+            "molecular_weight_display": "87.12",
+            "chemical_name": "acetamide Dimethyl",
+            "cas": "127-19-5",
+            "source": "oel_original_values",
+            "source_row_key": "oel:46:row_1",
+            "page_number": 46,
+        }
+        agent = StructuredAgent(store)
+        res = agent.execute(
+            "STRUCTURED.CHEMICAL.MOLECULAR_WEIGHT",
+            {"chemical_name": "acetamide Dimethyl", "cas": "127-19-5"},
+        )
+        assert res.success
+        assert res.data["page_number"] == 46
+        assert res.data["source_row_key"] == "oel:46:row_1"
+        assert res.citations
+        assert res.citations[0]["page_number"] == 46
+        assert res.citations[0]["source_row_key"] == "oel:46:row_1"
+        assert res.citations[0]["table"] == "oel_chemical_limits"
+
 
 def _db_available() -> bool:
     try:

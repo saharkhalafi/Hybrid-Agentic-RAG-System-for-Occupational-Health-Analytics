@@ -56,9 +56,14 @@ class AnswerSynthesizer:
         return "اطلاعات کافی برای پاسخ قطعی در داده‌های موجود پیدا نشد.", citations
 
     def _structured_answer(self, intent: str, data: dict[str, Any]) -> tuple[str, list[dict[str, Any]]]:
-        chem = data.get("chemical_name") or ""
+        chem = data.get("chemical_name") or data.get("english_name") or ""
         unit = data.get("unit") or "ppm"
-        if intent == "STRUCTURED.OEL.ALL_LIMITS_LOOKUP":
+        if intent == "STRUCTURED.CHEMICAL.BY_NAME":
+            cas = data.get("cas") or ""
+            fa = data.get("persian_name") or ""
+            label = " ".join(part for part in (chem, fa) if part).strip() or chem
+            text = f"CAS {label}: {cas}".strip() if cas else f"{label}".strip() or "داده‌ای یافت نشد."
+        elif intent == "STRUCTURED.OEL.ALL_LIMITS_LOOKUP":
             parts = []
             if data.get("twa") is not None:
                 parts.append(f"TWA: {data['twa']} {unit}")
@@ -72,6 +77,13 @@ class AnswerSynthesizer:
             text = f"وزن مولکولی {chem}: {display}"
         elif intent == "STRUCTURED.OEL.PROVENANCE":
             text = f"منبع: صفحه {data.get('page_number')} — {data.get('source_row_key')}"
+            extras = []
+            if data.get("symbols"):
+                extras.append(str(data["symbols"]))
+            if data.get("health_effect"):
+                extras.append(str(data["health_effect"]))
+            if extras:
+                text += " — " + " / ".join(extras)
         else:
             field = data.get("field") or "TWA"
             val = data.get("value")

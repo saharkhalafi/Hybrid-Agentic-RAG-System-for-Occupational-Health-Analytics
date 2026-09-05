@@ -25,6 +25,7 @@ CHEMICAL_OEL_ENGLISH_SIGNATURES = (
 )
 
 CAS_PATTERN = re.compile(r"\[\d{2,7}-\d{2}-\d\]")
+OEL_LIMIT_UNIT_PATTERN = re.compile(r"\bppm\b|mg/m", re.IGNORECASE)
 
 
 def has_chemical_oel_signatures(page_text: str) -> bool:
@@ -35,6 +36,31 @@ def has_chemical_oel_signatures(page_text: str) -> bool:
     )
     has_cas = bool(CAS_PATTERN.search(text))
     return persian_hits >= 2 and english_hits >= 2 and has_cas
+
+
+OEL_CONTINUATION_PAGE_START = 46
+OEL_CONTINUATION_PAGE_END = 161
+
+
+def looks_like_oel_table_page(page_text: str, page_number: int | None = None) -> bool:
+    """Headered OEL pages anywhere; continuation body pages only in the HSE6 OEL band."""
+    if has_chemical_oel_signatures(page_text):
+        return True
+    text = page_text or ""
+    headered = (
+        "نام علمی ماده شیمیایی" in text
+        and re.search(r"\bTWA\b", text, re.I) is not None
+        and re.search(r"\bSTEL\b", text, re.I) is not None
+    )
+    if headered:
+        return True
+    if page_number is not None and not (
+        OEL_CONTINUATION_PAGE_START <= page_number <= OEL_CONTINUATION_PAGE_END
+    ):
+        return False
+    if not CAS_PATTERN.search(text):
+        return False
+    return bool(OEL_LIMIT_UNIT_PATTERN.search(text))
 
 
 def evaluate_table_detection(
@@ -51,7 +77,7 @@ def evaluate_table_detection(
             "recovery_method": None,
         }
 
-    if document_type == "chemical_oel_table" and has_chemical_oel_signatures(page_text):
+    if document_type == "chemical_oel_table" and looks_like_oel_table_page(page_text):
         return {
             "table_detection_status": "missed_by_document_ai",
             "needs_recovery": True,

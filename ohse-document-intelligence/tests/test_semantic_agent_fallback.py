@@ -22,10 +22,10 @@ def _pipe_factory(primary_pipe, fallback_pipe):
     return factory
 
 
-def test_default_mode_is_vector_metadata_without_fallback():
+def test_default_mode_is_evidence_candidates_without_fallback():
     agent = SemanticAgent(MagicMock(), use_isolated_session=False)
     assert agent.retrieval_mode == DEFAULT_RETRIEVAL_MODE
-    assert agent.retrieval_mode == RetrievalMode.VECTOR_METADATA
+    assert agent.retrieval_mode == RetrievalMode.EVIDENCE_CANDIDATES
     assert agent.fallback_mode is None
 
 

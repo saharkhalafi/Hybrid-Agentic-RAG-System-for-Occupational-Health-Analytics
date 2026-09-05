@@ -431,4 +431,5 @@ ohse-document-intelligence/scripts/run_phase7_chunk_rebuild.py
 *.dump
 
 ohse-document-intelligence/goldset.xlsx
+*.xlsx
 page51.json

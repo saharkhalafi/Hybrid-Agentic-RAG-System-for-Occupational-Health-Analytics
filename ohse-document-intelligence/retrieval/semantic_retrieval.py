@@ -7,9 +7,16 @@ from typing import Any
 
 # Hard production scope for the Semantic Agent (enforced in SQL, not by callers).
 SEMANTIC_SOURCE_TYPE = "semantic_text"
+ROW_KNOWLEDGE_SOURCE_TYPE = "row_knowledge"
 SEMANTIC_VALIDATION_STATUS = "accepted"
 SEMANTIC_LANGUAGE = "fa"
+# Canonical row_knowledge is stored as bilingual Persian/English text.
+ROW_KNOWLEDGE_LANGUAGE = "fa,en"
+PRODUCTION_RETRIEVAL_SOURCE_TYPES = (SEMANTIC_SOURCE_TYPE, ROW_KNOWLEDGE_SOURCE_TYPE)
+PRODUCTION_RETRIEVAL_LANGUAGES = (SEMANTIC_LANGUAGE, ROW_KNOWLEDGE_LANGUAGE)
 SEMANTIC_SIMILARITY_METRIC = "cosine_distance"  # pgvector `<=>` operator
+# Fixture rows inserted by tests; never belong in the production ANN candidate pool.
+TEST_CHUNK_ID_PREFIX = "test_persian_"
 
 
 @dataclass(frozen=True)

@@ -432,6 +432,87 @@ def test_recovery_triggered_for_header_cas_pollution():
     assert _needs_pymupdf_recovery(page_text, [table]) is True
 
 
+def test_seven_column_oel_grid_not_replaced_for_header_cas_pollution():
+    """Keep DAI 7-col STEL/TWA grids; overlay repairs cloned limits in place."""
+    page_text = (
+        "Acrylamide [79-06-1] Acrylic acid [79-10-7] Acrylonitrile [107-13-1] "
+        "Allyl alcohol [107-18-6] Allyl chloride [107-05-1] Allyl glycidyl ether "
+        "[106-92-3] Aluminum [7429-90-5] Aluminum oxide [1344-28-1]"
+    )
+    header = _seven_col_oel_header(page=48, table_id="table_048_01")
+    cloned = {"x": 327.17, "y": 167.57, "width": 17.83, "height": 11.03}
+    header[5] = _cell(
+        "Acrylamide [79-06-1] Acrylic acid [79-10-7] Acrylonitrile [107-13-1] "
+        "Allyl alcohol [107-18-6] Allyl chloride [107-05-1]",
+        0,
+        5,
+        table_id="table_048_01",
+        page=48,
+    )
+    table = _oel_table(
+        [
+            header,
+            [
+                _cell("", 1, 0, table_id="table_048_01", page=48),
+                _cell("A3", 1, 1, table_id="table_048_01", page=48),
+                _cell("0.03 mg/m3", 1, 2, table_id="table_048_01", page=48, bbox=dict(cloned)),
+                _cell("0.03 mg/m3", 1, 3, table_id="table_048_01", page=48, bbox=dict(cloned)),
+                _cell("71.08", 1, 4, table_id="table_048_01", page=48, bbox={"x": 381.3, "y": 167.5, "width": 23.0, "height": 12.0}),
+                _cell("Acrylamide [79-06-1]", 1, 5, table_id="table_048_01", page=48, bbox={"x": 449.9, "y": 167.5, "width": 80.0, "height": 12.0}),
+                _cell("14", 1, 6, table_id="table_048_01", page=48, bbox={"x": 594.2, "y": 167.5, "width": 10.0, "height": 12.0}),
+            ],
+            [
+                _cell("", 2, 0, table_id="table_048_01", page=48),
+                _cell("", 2, 1, table_id="table_048_01", page=48),
+                _cell("2 ppm", 2, 2, table_id="table_048_01", page=48, bbox={"x": 244.0, "y": 200.0, "width": 30.0, "height": 11.0}),
+                _cell("2 ppm", 2, 3, table_id="table_048_01", page=48, bbox={"x": 317.0, "y": 200.0, "width": 30.0, "height": 11.0}),
+                _cell("72.06", 2, 4, table_id="table_048_01", page=48, bbox={"x": 381.3, "y": 200.0, "width": 23.0, "height": 12.0}),
+                _cell("Acrylic acid [79-10-7]", 2, 5, table_id="table_048_01", page=48, bbox={"x": 449.9, "y": 200.0, "width": 80.0, "height": 12.0}),
+                _cell("15", 2, 6, table_id="table_048_01", page=48, bbox={"x": 594.2, "y": 200.0, "width": 10.0, "height": 12.0}),
+            ],
+        ],
+        page=48,
+        table_id="table_048_01",
+    )
+    assert _document_ai_table_quality_poor(page_text, table) is True
+    assert _needs_pymupdf_recovery(page_text, [table]) is False
+
+
+def test_collapsed_oel_grid_without_bboxes_still_recovers():
+    """True DAI collapse (no cell geometry) must still trigger PyMuPDF recovery."""
+    page_text = (
+        "Acrylamide [79-06-1] Acrylic acid [79-10-7] Acrylonitrile [107-13-1] "
+        "Allyl alcohol [107-18-6] Allyl chloride [107-05-1] Allyl glycidyl ether "
+        "[106-92-3] Aluminum [7429-90-5] Aluminum oxide [1344-28-1]"
+    )
+    header = _seven_col_oel_header(page=48, table_id="table_048_01")
+    header[5] = _cell(
+        "Acrylamide [79-06-1] Acrylic acid [79-10-7] Acrylonitrile [107-13-1]",
+        0,
+        5,
+        table_id="table_048_01",
+        page=48,
+    )
+    table = _oel_table(
+        [
+            header,
+            [
+                _cell("", 1, 0, table_id="table_048_01", page=48),
+                _cell("A3", 1, 1, table_id="table_048_01", page=48),
+                _cell("0.03 mg/m3", 1, 2, table_id="table_048_01", page=48),
+                _cell("0.03 mg/m3", 1, 3, table_id="table_048_01", page=48),
+                _cell("71.08", 1, 4, table_id="table_048_01", page=48),
+                _cell("Acrylamide [79-06-1]", 1, 5, table_id="table_048_01", page=48),
+                _cell("14", 1, 6, table_id="table_048_01", page=48),
+            ],
+        ],
+        page=48,
+        table_id="table_048_01",
+    )
+    assert _document_ai_table_quality_poor(page_text, table) is True
+    assert _needs_pymupdf_recovery(page_text, [table]) is True
+
+
 @pytest.mark.parametrize(
     ("table_type", "col_count"),
     [

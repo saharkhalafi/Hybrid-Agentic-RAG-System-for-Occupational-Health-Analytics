@@ -97,15 +97,19 @@ class TestCanonicalLimitTypeIntegrity:
 
 @pytest.mark.integration
 class TestCanonicalOnlyStructuredStore:
-    def test_legacy_only_acetone_returns_no_rows(self):
+    def test_acetone_canonical_cas_lookup(self):
         from database.session import SessionLocal
 
         session = SessionLocal()
         try:
             store = PostgresStructuredStore(session)
             rows = store.get_oel_by_cas("67-64-1")
-            assert rows == []
-            assert store.lookup_oel_field(cas="67-64-1", oel_type="TWA") is None
+            assert rows
+            result = store.lookup_oel_field(cas="67-64-1", oel_type="TWA")
+            assert result is not None
+            assert result["gold_artifact_path"] == CANONICAL_GOLD_ARTIFACT_PATH
+            assert result["validation_status"] == "accepted"
+            assert result["value"] is not None
         finally:
             session.close()
 
@@ -174,13 +178,12 @@ STATIC_CORRECTNESS_MATRIX = [
     pytest.param(
         {
             "query": "TWA acetone",
-            "session_id": "matrix-acetone-legacy-only",
+            "session_id": "matrix-acetone-twa",
             "expect_cas": "67-64-1",
-            "expect_structured_success": False,
-            "expect_no_data": True,
-            "expect_no_data_reason": "legacy_only_pending_promotion",
+            "expect_intent": "STRUCTURED.OEL.TWA_LOOKUP",
+            "expect_structured_success": True,
         },
-        id="legacy_only_acetone_no_data",
+        id="acetone_twa_lookup",
     ),
     pytest.param(
         {
@@ -242,33 +245,32 @@ STATIC_CORRECTNESS_MATRIX = [
     pytest.param(
         {
             "query": "TWA استون چقدره",
-            "session_id": "matrix-acetone-fa-legacy",
+            "session_id": "matrix-acetone-fa",
             "expect_cas": "67-64-1",
-            "expect_structured_success": False,
-            "expect_no_data": True,
+            "expect_intent": "STRUCTURED.OEL.TWA_LOOKUP",
+            "expect_structured_success": True,
         },
-        id="legacy_only_acetone_persian",
+        id="acetone_persian_twa",
     ),
     pytest.param(
         {
             "query": "TWA Acetic acid",
-            "session_id": "matrix-acetic-legacy",
+            "session_id": "matrix-acetic-acid",
             "expect_cas": "64-19-7",
-            "expect_structured_success": False,
-            "expect_no_data": True,
+            "expect_intent": "STRUCTURED.OEL.TWA_LOOKUP",
+            "expect_structured_success": True,
         },
-        id="legacy_only_acetic_acid",
+        id="acetic_acid_twa",
     ),
     pytest.param(
         {
             "query": "TWA Acetamide",
-            "session_id": "matrix-acetamide-legacy",
+            "session_id": "matrix-acetamide-twa",
             "expect_cas": "60-35-5",
-            "expect_structured_success": False,
-            "expect_no_data": True,
-            "expect_no_data_reason": "legacy_only_pending_promotion",
+            "expect_intent": "STRUCTURED.OEL.TWA_LOOKUP",
+            "expect_structured_success": True,
         },
-        id="legacy_only_acetamide",
+        id="acetamide_twa",
     ),
     pytest.param(
         {

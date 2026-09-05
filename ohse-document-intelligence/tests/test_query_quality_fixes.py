@@ -139,3 +139,72 @@ class TestOrchestratorEndToEnd:
             assert resp.gate_decision == "reject"
         finally:
             session.close()
+
+
+class TestG6ExplicitLatinBeatsPersianTie:
+    """Unique Latin/CAS in the query must not be dropped for a Persian-name tie."""
+
+    def setup_method(self):
+        self.c = IntentClassifier()
+
+    def test_unique_latin_retained_despite_ambiguous_persian(self):
+        from database.session import SessionLocal
+
+        query = "مواجهه با هیدرید آنتیموان (Antimony hydride) چه عوارضی دارد؟"
+        session = SessionLocal()
+        try:
+            u = understand_query(session, query)
+            assert u.chemical is not None
+            assert u.chemical.ambiguous is False
+            assert u.slots.get("ambiguous_chemical") is not True
+            assert u.chemical.canonical_name
+            assert "antimony" in u.chemical.canonical_name.lower()
+            r = self.c.classify(u.normalized_query, slots=u.slots)
+            assert r.intent != "CLARIFY.MISSING_CHEMICAL", r.intent
+        finally:
+            session.close()
+
+    def test_explicit_cas_retained_despite_ambiguous_persian(self):
+        from database.session import SessionLocal
+
+        query = "TWA اسید 71-43-2 چقدر است؟"
+        session = SessionLocal()
+        try:
+            u = understand_query(session, query)
+            assert u.chemical is not None
+            assert u.chemical.ambiguous is False
+            assert u.chemical.cas == "71-43-2"
+            assert u.slots.get("cas") == "71-43-2"
+            r = self.c.classify(u.normalized_query, slots=u.slots)
+            assert r.intent != "CLARIFY.MISSING_CHEMICAL", r.intent
+        finally:
+            session.close()
+
+    def test_missing_entity_still_missing_chemical(self):
+        from database.session import SessionLocal
+
+        session = SessionLocal()
+        try:
+            u = understand_query(session, "حدش چنده؟")
+            r = self.c.classify(u.normalized_query, slots=u.slots)
+            assert r.intent == "CLARIFY.MISSING_CHEMICAL"
+            assert not u.slots.get("chemical_name")
+            assert not u.slots.get("cas")
+        finally:
+            session.close()
+
+    def test_q13_molecular_weight_intent_unchanged(self):
+        from database.session import SessionLocal
+
+        query = "وزن مولکولی اتیون (Ethion) طبق جدول چقدر است؟"
+        session = SessionLocal()
+        try:
+            u = understand_query(session, query)
+            r = self.c.classify(u.normalized_query, slots=u.slots)
+            assert u.chemical is not None
+            assert u.chemical.canonical_name == "Ethion"
+            assert u.chemical.cas == "563-12-2"
+            assert r.intent == "STRUCTURED.CHEMICAL.MOLECULAR_WEIGHT", r.intent
+        finally:
+            session.close()
+

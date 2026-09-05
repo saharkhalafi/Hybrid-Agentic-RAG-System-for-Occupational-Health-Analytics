@@ -185,10 +185,11 @@ def test_multi_cas_same_visual_row_keeps_one_stel_twa_pair():
 
 
 class _GeomCell:
-    def __init__(self, text, bbox=None):
+    def __init__(self, text, bbox=None, column=None):
         self.text = text
         self.bbox = bbox
         self.row = 0
+        self.column = column
         self.source_reference = {}
 
 
@@ -309,10 +310,10 @@ def test_empty_stel_column_does_not_shift_twa_onto_stel_cluster():
         ]
     )
     row = [
-        _GeomCell(""),
-        _GeomCell("6 ppm", _xywh(305, 138, 45, 16)),
-        _GeomCell("85 / 10", _xywh(370, 138, 50, 16)),
-        _GeomCell("100-00-0"),
+        _GeomCell("", column=2),
+        _GeomCell("6 ppm", _xywh(305, 138, 45, 16), column=3),
+        _GeomCell("85 / 10", _xywh(370, 138, 50, 16), column=4),
+        _GeomCell("100-00-0", column=5),
     ]
     rows, split_count = split_table_rows_by_cas_geometry(
         [row],
@@ -545,3 +546,74 @@ def test_header_mapping_precedes_positional_column_map():
     assert resolve_field_name(3, "TWA", mapping) == "STEL"
     assert resolve_field_name(4, "STEL", mapping) == "molecular_weight"
     assert resolve_field_name(2, "STEL", {}) == "STEL"
+
+
+def test_missing_physical_stel_does_not_clear_symbols_or_shift_twa():
+    """Row [0, 1, 3, 4, 5, 6]: list index 2 is TWA, not STEL."""
+
+    page = _limit_page(
+        [
+            _w(80, 140, 100, 152, "A2"),
+            _w(80, 154, 110, 166, "پوست"),
+            _w(80, 168, 105, 180, "BEI"),
+            _w(312, 140, 322, 152, "1"),
+            _w(322, 140, 345, 152, "ppm"),
+            _w(379, 140, 395, 152, "44"),
+            _w(395, 140, 400, 152, "/"),
+            _w(400, 140, 410, 152, "05"),
+            _w(430, 140, 500, 152, "75-21-8"),
+        ]
+    )
+    symbols = "A2\n،پوست؛\nBEI"
+    row = [
+        _GeomCell("سرطان‌زا", column=0),
+        _GeomCell(symbols, _xywh(70, 138, 50, 50), column=1),
+        _GeomCell("1 ppm", _xywh(305, 138, 45, 16), column=3),
+        _GeomCell("44 / 05", _xywh(370, 138, 50, 16), column=4),
+        _GeomCell("Ethylene oxide [75-21-8]", column=5),
+        _GeomCell("6", column=6),
+    ]
+    rows, split_count = split_table_rows_by_cas_geometry(
+        [row],
+        [CasGeometry("75-21-8", 140.0, 152.0, 430.0, 500.0)],
+        page=page,
+    )
+    assert split_count == 0
+    out = rows[0]
+    by_col = {cell.column: cell for cell in out}
+    assert (by_col[1].text or "") == symbols
+    assert "A2" in (by_col[1].text or "")
+    assert "BEI" in (by_col[1].text or "")
+    assert "2A" not in (by_col[1].text or "")
+    assert (by_col[3].text or "").strip() == "1 ppm"
+    assert 2 not in by_col
+    symbols_ref = by_col[1].source_reference or {}
+    assert symbols_ref.get("physical_value_unresolved") is not True
+
+
+def test_physical_stel_column_still_owns_stel_when_present():
+    page = _limit_page(
+        [
+            _w(245, 140, 255, 152, "5"),
+            _w(255, 140, 278, 152, "ppm"),
+            _w(312, 140, 322, 152, "2"),
+            _w(322, 140, 345, 152, "ppm"),
+            _w(430, 140, 500, 152, "100-00-0"),
+        ]
+    )
+    row = [
+        _GeomCell("", column=0),
+        _GeomCell("A4", column=1),
+        _GeomCell("5 ppm", _xywh(240, 138, 40, 16), column=2),
+        _GeomCell("2 ppm", _xywh(305, 138, 45, 16), column=3),
+        _GeomCell("100-00-0", column=5),
+    ]
+    rows, _ = split_table_rows_by_cas_geometry(
+        [row],
+        [CasGeometry("100-00-0", 140.0, 152.0, 430.0, 500.0)],
+        page=page,
+    )
+    by_col = {cell.column: cell for cell in rows[0]}
+    assert (by_col[1].text or "").strip() == "A4"
+    assert (by_col[2].text or "").strip() == "5 ppm"
+    assert (by_col[3].text or "").strip() == "2 ppm"

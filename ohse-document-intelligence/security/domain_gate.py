@@ -399,17 +399,8 @@ class DomainSafetyGate:
                 message_fa="لطفاً سؤال خود را در حوزه بهداشت و ایمنی شغلی مشخص‌تر بیان کنید.",
             )
 
-        # Longer query with zero HSE signal → REJECT
-        if hse_score < 0.1:
-            return GateResult(
-                decision=GateDecision.REJECT,
-                confidence=0.75,
-                reasons=["no_hse_signal"],
-                signals=signals,
-                message_fa="این سؤال مربوط به بهداشت و ایمنی شغلی (OHSE) نیست.",
-            )
-
-        # Default: allow ambiguous queries to proceed (classifier will clarify)
+        # Missing keyword / unseen wording is not evidence of being off-domain.
+        # Clearly unrelated queries are already rejected by off-domain patterns.
         return GateResult(
             decision=GateDecision.PASS,
             confidence=0.5,

@@ -19,10 +19,14 @@ from database.models import ChunkType, Document, DocumentChunk, KnowledgeSyncRun
 from knowledge.metadata_contract import KnowledgeMetadata, SourceReference
 from persistence.knowledge_pipeline import ensure_document, resolve_document_content_hash
 from retrieval.embeddings import EmbeddingService, get_embedding_service
+from retrieval.page_identity import retrieval_page_fields
 from retrieval.semantic_retrieval import (
+    PRODUCTION_RETRIEVAL_LANGUAGES,
+    PRODUCTION_RETRIEVAL_SOURCE_TYPES,
     SEMANTIC_LANGUAGE,
     SEMANTIC_SOURCE_TYPE,
     SEMANTIC_VALIDATION_STATUS,
+    TEST_CHUNK_ID_PREFIX,
     SemanticRetrievalResult,
 )
 
@@ -425,17 +429,44 @@ def _chunk_to_retrieval_result(chunk: DocumentChunk, score: float) -> SemanticRe
     )
 
 
-def _production_semantic_query(session: Session, *, document_id: uuid.UUID | None = None):
-    """Base query scoped to production Persian semantic chunks only."""
-    stmt = select(DocumentChunk).where(
-        DocumentChunk.source_type == SEMANTIC_SOURCE_TYPE,
+def _exclude_test_fixture_clause():
+    """ANN/SQL: test_persian_* must not occupy the production candidate window."""
+    return ~DocumentChunk.chunk_id.like(f"{TEST_CHUNK_ID_PREFIX}%")
+
+
+def _production_retrieval_clauses(
+    *,
+    document_id: uuid.UUID | None = None,
+    source_types: tuple[str, ...] | None = None,
+):
+    """Shared production ANN filters: accepted embedded semantic_text + row_knowledge."""
+    types = source_types or PRODUCTION_RETRIEVAL_SOURCE_TYPES
+    clauses = [
+        DocumentChunk.source_type.in_(types),
         DocumentChunk.validation_status == SEMANTIC_VALIDATION_STATUS,
         DocumentChunk.embedding.is_not(None),
-        DocumentChunk.language == SEMANTIC_LANGUAGE,
-    )
+        DocumentChunk.language.in_(PRODUCTION_RETRIEVAL_LANGUAGES),
+        _exclude_test_fixture_clause(),
+    ]
     if document_id is not None:
-        stmt = stmt.where(DocumentChunk.document_id == document_id)
-    return stmt
+        clauses.append(DocumentChunk.document_id == document_id)
+    return clauses
+
+
+def _is_production_retrieval_chunk(chunk: DocumentChunk) -> bool:
+    source_type = chunk.source_type or ""
+    language = chunk.language or ""
+    return (
+        source_type in PRODUCTION_RETRIEVAL_SOURCE_TYPES
+        and chunk.validation_status == SEMANTIC_VALIDATION_STATUS
+        and language in PRODUCTION_RETRIEVAL_LANGUAGES
+        and not str(chunk.chunk_id or "").startswith(TEST_CHUNK_ID_PREFIX)
+    )
+
+
+def _production_semantic_query(session: Session, *, document_id: uuid.UUID | None = None):
+    """Base query scoped to production Persian semantic + row_knowledge chunks."""
+    return select(DocumentChunk).where(*_production_retrieval_clauses(document_id=document_id))
 
 
 def embed_query_vector(query: str, *, embedder: EmbeddingService | None = None) -> list[float]:
@@ -461,6 +492,7 @@ def search_by_query_vector(
     *,
     document_id: uuid.UUID | None = None,
     limit: int = 5,
+    source_types: tuple[str, ...] | None = None,
 ) -> list[dict[str, Any]]:
     """pgvector search using a pre-computed query vector (short DB hold)."""
     distance_expr = DocumentChunk.embedding.cosine_distance(query_vector)
@@ -468,21 +500,16 @@ def search_by_query_vector(
 
     stmt = (
         select(DocumentChunk, score_expr)
-        .where(
-            DocumentChunk.source_type == SEMANTIC_SOURCE_TYPE,
-            DocumentChunk.validation_status == SEMANTIC_VALIDATION_STATUS,
-            DocumentChunk.embedding.is_not(None),
-            DocumentChunk.language == SEMANTIC_LANGUAGE,
-            *([DocumentChunk.document_id == document_id] if document_id else []),
-        )
+        .where(*_production_retrieval_clauses(document_id=document_id, source_types=source_types))
         .order_by(distance_expr)
         .limit(max(1, limit))
     )
 
     rows = session.execute(stmt).all()
     results: list[dict[str, Any]] = []
+    seen_chunk_ids: set[str] = set()
     for chunk, score in rows:
-        if chunk.source_type != SEMANTIC_SOURCE_TYPE or chunk.validation_status != SEMANTIC_VALIDATION_STATUS:
+        if not _is_production_retrieval_chunk(chunk):
             logger.error(
                 "semantic_scope_violation",
                 chunk_id=chunk.chunk_id,
@@ -490,7 +517,19 @@ def search_by_query_vector(
                 validation_status=chunk.validation_status,
             )
             continue
-        results.append(_chunk_to_retrieval_result(chunk, score).to_dict())
+        chunk_id = str(chunk.chunk_id or "")
+        if chunk_id:
+            if chunk_id in seen_chunk_ids:
+                continue
+            seen_chunk_ids.add(chunk_id)
+        payload = _chunk_to_retrieval_result(chunk, score).to_dict()
+        payload.update(
+            retrieval_page_fields(
+                page_number=chunk.page_number,
+                printed_page_number=chunk.printed_page_number,
+            )
+        )
+        results.append(payload)
     return results
 
 
@@ -505,10 +544,11 @@ def search_persian_semantic(
     """Retrieve accepted Persian semantic chunks via Gemini embedding + pgvector cosine search.
 
     Production scope (always enforced):
-        source_type = 'semantic_text'
+        source_type IN ('semantic_text', 'row_knowledge')
         validation_status = 'accepted'
         embedding IS NOT NULL
-        language = 'fa'
+        language IN ('fa', 'fa,en')
+        chunk_id NOT LIKE 'test_persian_%'
 
     Query embedding uses the same Gemini model/dimension as stored chunk embeddings.
     Content is returned exactly as stored — numerics are never modified.

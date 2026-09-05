@@ -679,9 +679,9 @@ def _recover_from_word_lines(page_number: int, geom: PageGeometryIndex) -> Recov
 
 
 def recover_tables_for_page(pdf_path: Path, page_number: int, page_text: str) -> list[RecoveredTable]:
-    from goldset_generator.table_detection_gate import has_chemical_oel_signatures
+    from goldset_generator.table_detection_gate import looks_like_oel_table_page
 
-    if not has_chemical_oel_signatures(page_text):
+    if not looks_like_oel_table_page(page_text, page_number):
         return []
     table = recover_chemical_oel_table(pdf_path, page_number)
     return [table] if table else []

@@ -17,11 +17,18 @@ from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import flag_modified
 
 from config.logging import get_logger
 from config.settings import Settings, get_settings
 from database.models import ChemicalRegistry, Document, KnowledgeSyncRun, OELChemicalLimit
 from knowledge.metadata_contract import FieldProvenance, KnowledgeMetadata, SourceReference
+from persistence.chemical_identity import (
+    apply_extracted_identity,
+    build_identity_aliases,
+    extract_identity_names,
+    is_generic_identity,
+)
 
 logger = get_logger(__name__)
 
@@ -242,26 +249,29 @@ def _upsert_chemical(
     molecular_weight: float | None,
     gold_path: str,
 ) -> tuple[ChemicalRegistry, bool]:
+    extracted = extract_identity_names(cas, english_name, persian_name)
+    cas = extracted.cas or cas
+    if extracted.english_name and (not english_name or is_generic_identity(english_name)):
+        english_name = extracted.english_name
+    if extracted.persian_name and (not persian_name or is_generic_identity(persian_name)):
+        persian_name = extracted.persian_name
+    aliases = build_identity_aliases(english_name=english_name, persian_name=persian_name)
+
     chemical = session.scalar(select(ChemicalRegistry).where(ChemicalRegistry.cas == cas))
-    aliases: dict[str, list[str]] = {}
-    if english_name:
-        aliases["en"] = [english_name]
-    if persian_name:
-        aliases["fa"] = [persian_name]
     if chemical:
-        if english_name and not chemical.english_name:
+        apply_extracted_identity(chemical, extracted)
+        if english_name and (not chemical.english_name or is_generic_identity(chemical.english_name)):
             chemical.english_name = english_name
-        if persian_name and not chemical.persian_name:
+        if persian_name and (not chemical.persian_name or is_generic_identity(chemical.persian_name)):
             chemical.persian_name = persian_name
         if molecular_weight is not None and chemical.molecular_weight is None:
             chemical.molecular_weight = molecular_weight
-        merged = dict(chemical.aliases or {})
-        for lang, names in aliases.items():
-            merged.setdefault(lang, [])
-            for name in names:
-                if name not in merged[lang]:
-                    merged[lang].append(name)
-        chemical.aliases = merged or None
+        chemical.aliases = build_identity_aliases(
+            english_name=chemical.english_name,
+            persian_name=chemical.persian_name,
+            extra=chemical.aliases if isinstance(chemical.aliases, dict) else None,
+        )
+        flag_modified(chemical, "aliases")
         chemical.validation_status = "accepted"
         chemical.gold_artifact_path = gold_path
         return chemical, False
@@ -271,7 +281,7 @@ def _upsert_chemical(
         english_name=english_name,
         persian_name=persian_name,
         molecular_weight=molecular_weight,
-        aliases=aliases or None,
+        aliases=aliases,
         validation_status="accepted",
         gold_artifact_path=gold_path,
     )
@@ -326,12 +336,10 @@ def sync_gold_table_file(
 
         name_field = row.get("chemical_name") or row.get("Chemical") or {}
         english_name = name_field.get("value") if isinstance(name_field, dict) else None
-        persian_name = None
-        if isinstance(name_field, dict):
-            orig = name_field.get("original_value") or ""
-            persian_match = re.search(r"[\u0600-\u06FF]+", str(orig))
-            if persian_match:
-                persian_name = persian_match.group()
+        extracted_names = extract_identity_names(name_field, english_name)
+        if extracted_names.english_name and (not english_name or is_generic_identity(english_name)):
+            english_name = extracted_names.english_name
+        persian_name = extracted_names.persian_name
 
         mw_field = row.get("molecular_weight") or row.get("Molecular_weight") or {}
         molecular_weight = _parse_float(mw_field.get("value") if isinstance(mw_field, dict) else None)

@@ -9,7 +9,11 @@ import uuid
 import pytest
 from sqlalchemy import func, select
 
-from retrieval.semantic_retrieval import REQUIRED_RESULT_FIELDS, SEMANTIC_SOURCE_TYPE
+from retrieval.semantic_retrieval import (
+    PRODUCTION_RETRIEVAL_SOURCE_TYPES,
+    REQUIRED_RESULT_FIELDS,
+    SEMANTIC_SOURCE_TYPE,
+)
 
 PERSIAN_RE = re.compile(r"[\u0600-\u06FF]")
 
@@ -103,7 +107,7 @@ def test_search_returns_full_metadata():
     assert results
     for row in results:
         assert set(row.keys()) >= REQUIRED_RESULT_FIELDS
-        assert row["source_type"] == "semantic_text"
+        assert row["source_type"] in PRODUCTION_RETRIEVAL_SOURCE_TYPES
         assert row["validation_status"] == "accepted"
         assert row["embedding_model"]
         assert row["embedding_dimension"] == 3072
@@ -119,9 +123,9 @@ def test_scope_isolation_no_legacy_source_types():
     with session_scope() as session:
         results = search_persian_semantic(session, "مواد شیمیایی و سروصدا", limit=10)
     for row in results:
-        assert row["source_type"] == "semantic_text"
+        assert row["source_type"] in PRODUCTION_RETRIEVAL_SOURCE_TYPES
         assert row["validation_status"] == "accepted"
-        assert row["language"] == "fa"
+        assert row["language"] in {"fa", "fa,en"}
 
 
 @pytestmark_db
@@ -217,5 +221,5 @@ def test_no_english_legacy_qa_in_results():
     with session_scope() as session:
         results = search_persian_semantic(session, "What is TWA occupational exposure limit", limit=5)
     for row in results:
-        assert row["source_type"] == "semantic_text"
+        assert row["source_type"] in PRODUCTION_RETRIEVAL_SOURCE_TYPES
         assert row["validation_status"] != "legacy_reference"

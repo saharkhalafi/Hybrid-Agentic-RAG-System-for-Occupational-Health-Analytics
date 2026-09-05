@@ -43,7 +43,7 @@ def test_evaluate_cell_geometry_gate_low_confidence():
     assert result.persist is False
 
 
-def test_persist_universal_tables_skips_low_confidence_cells():
+def test_persist_universal_tables_persists_low_confidence_cells():
     session = MagicMock()
     document = MagicMock()
     document.id = uuid.uuid4()
@@ -77,7 +77,9 @@ def test_persist_universal_tables_skips_low_confidence_cells():
     persist_universal_tables(session, document, structural, page_detection={})
 
     added_cells = [call.args[0] for call in session.add.call_args_list if hasattr(call.args[0], "raw_text")]
-    assert added_cells == []
+    assert len(added_cells) == 1
+    assert added_cells[0].bbox_confidence == 0.5
+    assert added_cells[0].source_reference["geometry_gate"] == "low_confidence"
 
 
 def test_persist_universal_tables_accepts_high_confidence_cells():

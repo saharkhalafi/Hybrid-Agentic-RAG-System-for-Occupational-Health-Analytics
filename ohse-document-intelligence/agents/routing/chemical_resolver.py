@@ -13,6 +13,13 @@ from agents.routing.chemical_registry_cache import get_accepted_chemicals
 from agents.routing.entity_signals import extract_persian_entity_tokens, query_has_entity_attempt, query_has_explicit_entity_signal
 from agents.routing.normalizer import strip_limit_type_prefix
 from database.models import ChemicalRegistry
+from persistence.chemical_identity import (
+    is_generic_identity,
+    iter_alias_labels,
+    names_match_exact,
+    normalize_cas,
+    normalize_name,
+)
 
 # Common leading descriptors in OHE6 English names (reversed in user queries)
 DESCRIPTOR_PREFIXES = frozenset({
@@ -123,7 +130,7 @@ class ChemicalResolution:
 
 
 def _normalize_name(name: str) -> str:
-    return re.sub(r"\s+", " ", name.strip().lower())
+    return normalize_name(name)
 
 
 def _tokenize(name: str) -> set[str]:
@@ -139,7 +146,7 @@ def _persian_labels(chem: ChemicalRegistry) -> list[str]:
         for fa in aliases.get("fa") or []:
             if fa and isinstance(fa, str):
                 labels.append(fa.strip())
-    return [label for label in labels if len(label) >= 2]
+    return [label for label in labels if len(label) >= 2 and not is_generic_identity(label)]
 
 
 def _query_modifier_tokens(q: str) -> set[str]:
@@ -269,6 +276,65 @@ def _resolve_compound_root_hints(
     )
 
 
+def _clean_latin_phrase(name: str) -> str:
+    return name.strip().strip("()[]").strip()
+
+
+def _is_generic_latin_token(name: str) -> bool:
+    tokens = _normalize_name(name).split()
+    return len(tokens) == 1 and tokens[0] in DESCRIPTOR_PREFIXES
+
+
+def _collect_latin_candidates(query: str) -> list[str]:
+    """Explicit Latin phrases, longer/reversed registry forms before generic tokens."""
+    ordered: list[str] = []
+    seen: set[str] = set()
+
+    def add(name: str) -> None:
+        cleaned = _clean_latin_phrase(name)
+        if not cleaned or cleaned.upper() in NON_CHEMICAL_TOKENS:
+            return
+        key = _normalize_name(cleaned)
+        if key in seen:
+            return
+        seen.add(key)
+        ordered.append(cleaned)
+
+    for variant in _reverse_descriptor_phrase(query):
+        add(variant)
+    for match in re.finditer(r"\b([A-Za-z][a-zA-Z0-9\-()]+(?:\s+[a-zA-Z]+)+)\b", query):
+        phrase = match.group(1)
+        add(phrase)
+        parts = _clean_latin_phrase(phrase).split()
+        if len(parts) == 2:
+            add(f"{parts[1]} {parts[0]}")
+    for match in re.finditer(r"\b([A-Za-z][a-zA-Z0-9\-()]{2,})\b", query):
+        add(match.group(1))
+    return ordered
+
+
+def _is_specific_latin_entity(name: str) -> bool:
+    """True for a real Latin chemical phrase, not TWA/acid/formula_id tokens."""
+    cleaned = _clean_latin_phrase(name)
+    if not cleaned or cleaned.upper() in NON_CHEMICAL_TOKENS:
+        return False
+    if _is_generic_latin_token(cleaned):
+        return False
+    if any(ch.isdigit() for ch in cleaned):
+        return False
+    parts = cleaned.split()
+    if len(parts) >= 2:
+        return True
+    return len(cleaned) >= 5
+
+
+def _primary_specific_latin_phrase(query: str) -> str | None:
+    names = [n for n in _collect_latin_candidates(query) if _is_specific_latin_entity(n)]
+    if not names:
+        return None
+    return max(names, key=lambda n: (len(n.split()), len(n)))
+
+
 def _reverse_descriptor_phrase(query: str) -> list[str]:
     """Generate candidate names from 'acid Acetic' -> 'Acetic acid'."""
     candidates: list[str] = []
@@ -334,35 +400,55 @@ class ChemicalResolver:
         token_overlap_min = 0.65 if authoritative else 0.5
         partial_min_len = 5 if authoritative else 3
 
-        # 1. CAS exact
+        # 1. Exact CAS
         cas_m = CAS_PATTERN.search(q)
         if cas_m:
-            cas = _normalize_cas_match(cas_m.group(0))
+            cas = normalize_cas(cas_m.group(0)) or _normalize_cas_match(cas_m.group(0))
             chem = next(
-                (c for c in self._all_chemicals() if c.cas == cas),None,)
+                (c for c in self._all_chemicals() if normalize_cas(c.cas) == cas or c.cas == cas),
+                None,
+            )
             if chem:
                 return ChemicalResolution(
                     str(chem.id), chem.english_name, chem.cas, chem.persian_name,
                     1.0, "cas_exact",
                 )
 
-        # 2. Explicit candidates from query patterns
-        candidates_to_try: list[str] = []
-        for variant in _reverse_descriptor_phrase(q):
-            candidates_to_try.append(variant)
-        for m in re.finditer(r"\b([A-Za-z][a-zA-Z0-9\-()]+(?:\s+[a-zA-Z]+)+)\b", q):
-            token = m.group(1)
-            if token.upper() not in NON_CHEMICAL_TOKENS:
-                candidates_to_try.append(token)
-        for m in re.finditer(r"\b([A-Za-z][a-zA-Z0-9\-()]{2,})\b", q):
-            token = m.group(1)
-            if token.upper() not in NON_CHEMICAL_TOKENS and len(token) >= partial_min_len:
-                candidates_to_try.append(token)
+        # 2. Exact normalized Latin name
+        latin_ambiguous: ChemicalResolution | None = None
+        for name in _collect_latin_candidates(q):
+            if is_generic_identity(name):
+                continue
+            res = self._match_exact_latin(name)
+            if not res:
+                continue
+            if res.ambiguous:
+                if latin_ambiguous is None:
+                    latin_ambiguous = res
+                continue
+            return res
+        if latin_ambiguous is not None:
+            return latin_ambiguous
 
-        for name in candidates_to_try:
-            res = self._match_exact(name, authoritative=authoritative)
-            if res:
-                return res
+        # 3. Exact normalized Persian name (canonical field only)
+        persian_exact = self._match_exact_persian(q)
+        if persian_exact:
+            return persian_exact
+
+        # 4. Existing aliases / synonyms
+        alias_exact = self._match_exact_alias(q)
+        if alias_exact:
+            return alias_exact
+
+        specific_latin = _primary_specific_latin_phrase(q)
+        if specific_latin:
+            # Explicit Latin/CAS entity is present. Do not drop it for a Persian-name tie.
+            return ChemicalResolution(
+                None, specific_latin, None, None, 0.55, "latin_explicit",
+            )
+
+        if is_generic_identity(q):
+            return ChemicalResolution(None, None, None, None, 0.0, "no_match")
 
         chemicals = self._all_chemicals()
         compound = _resolve_compound_root_hints(q, chemicals)
@@ -513,62 +599,113 @@ class ChemicalResolver:
 
         return ChemicalResolution(None, None, None, None, top_score, "below_threshold")
 
+    def _resolution(self, chem: ChemicalRegistry, method: str, confidence: float = 1.0) -> ChemicalResolution:
+        return ChemicalResolution(
+            str(chem.id), chem.english_name, chem.cas, chem.persian_name, confidence, method,
+        )
+
+    def _ambiguous(self, chemicals: list[ChemicalRegistry], score: float = 0.9) -> ChemicalResolution:
+        return ChemicalResolution(
+            None, None, None, None, score, "ambiguous",
+            ambiguous=True,
+            candidates=[{"name": c.english_name, "cas": c.cas, "score": score} for c in chemicals[:3]],
+        )
+
+    def _match_exact_latin(self, name: str) -> ChemicalResolution | None:
+        name = name.strip()
+        if not name or name.upper() in NON_CHEMICAL_TOKENS or is_generic_identity(name):
+            return None
+        matches = [
+            chem for chem in self._all_chemicals()
+            if names_match_exact(chem.english_name, name)
+        ]
+        if len(matches) == 1:
+            return self._resolution(matches[0], "exact")
+        if len(matches) > 1:
+            return self._ambiguous(matches)
+        return None
+
+    def _identity_name_candidates(self, query: str) -> list[str]:
+        candidates: list[str] = []
+        fa_tokens = extract_persian_entity_tokens(query)
+        if fa_tokens:
+            candidates.append(" ".join(fa_tokens))
+            if len(fa_tokens) == 1:
+                candidates.append(fa_tokens[0])
+        for name in _collect_latin_candidates(query):
+            if not is_generic_identity(name):
+                candidates.append(name)
+        return candidates
+
+    def _match_exact_persian(self, query: str) -> ChemicalResolution | None:
+        candidates = self._identity_name_candidates(query)
+        if not candidates:
+            return None
+        matches: list[ChemicalRegistry] = []
+        for chem in self._all_chemicals():
+            label = (chem.persian_name or "").strip()
+            if len(label) < 2 or is_generic_identity(label):
+                continue
+            if any(names_match_exact(label, cand) for cand in candidates):
+                matches.append(chem)
+        if not matches:
+            return None
+        matches.sort(key=lambda c: len(c.persian_name or ""), reverse=True)
+        top = matches[0]
+        top_len = len(top.persian_name or "")
+        competing = [c for c in matches[1:] if len(c.persian_name or "") == top_len]
+        if competing:
+            return self._ambiguous([top, *competing])
+        return self._resolution(top, "persian_exact", 0.98)
+
+    def _match_exact_alias(self, query: str) -> ChemicalResolution | None:
+        candidates = self._identity_name_candidates(query)
+        if not candidates:
+            return None
+        hits: list[tuple[int, ChemicalRegistry]] = []
+        for chem in self._all_chemicals():
+            for _lang, label in iter_alias_labels(chem):
+                if is_generic_identity(label):
+                    continue
+                if any(names_match_exact(label, cand) for cand in candidates):
+                    hits.append((len(label), chem))
+                    break
+        if not hits:
+            return None
+        hits.sort(key=lambda x: x[0], reverse=True)
+        top_len, top_chem = hits[0]
+        competing = [chem for length, chem in hits[1:] if length == top_len and chem.id != top_chem.id]
+        if competing:
+            return self._ambiguous([top_chem, *competing])
+        return self._resolution(top_chem, "alias_exact", 0.95)
+
     def _match_exact(self, name: str, *, authoritative: bool = False) -> ChemicalResolution | None:
         name = name.strip()
-        if not name or name.upper() in NON_CHEMICAL_TOKENS:
+        if not name or name.upper() in NON_CHEMICAL_TOKENS or is_generic_identity(name):
             return None
+        latin = self._match_exact_latin(name)
+        if latin:
+            return latin
+        persian = self._match_exact_persian(name)
+        if persian:
+            return persian
+        if normalize_cas(name):
+            cas = normalize_cas(name)
+            chem = next((c for c in self._all_chemicals() if normalize_cas(c.cas) == cas), None)
+            if chem:
+                return self._resolution(chem, "cas_exact")
+        alias = self._match_exact_alias(name)
+        if alias:
+            return alias
         chemicals = self._all_chemicals()
         normalized_name = _normalize_name(name)
-        exact_matches = [
-        chem
-        for chem in chemicals
-        if (
-            _normalize_name(chem.english_name or "") == normalized_name
-            or _normalize_name(chem.persian_name or "") == normalized_name
-            or (chem.cas and chem.cas == name)
-        )]
-        if len(exact_matches) == 1:
-            chem = exact_matches[0]
-            return ChemicalResolution(
-            str(chem.id),
-            chem.english_name,
-            chem.cas,
-            chem.persian_name,
-            1.0,
-            "exact",
-        )
-        if len(exact_matches) > 1:
-            return ChemicalResolution(
-            None,
-            None,
-            None,
-            None,
-            0.9,
-            "ambiguous",
-            ambiguous=True,
-            candidates=[
-                {
-                    "name": chem.english_name,
-                    "cas": chem.cas,
-                    "score": 1.0,
-                }
-                for chem in exact_matches[:3]
-            ],
-        )
         partial_matches = [
-        chem
-        for chem in chemicals
-        if normalized_name in _normalize_name(chem.english_name or "")]
+            chem for chem in chemicals
+            if normalized_name in _normalize_name(chem.english_name or "")
+        ]
         if len(partial_matches) == 1:
             chem = partial_matches[0]
             if authoritative and len(name) < 5:
                 return None
-
-            return ChemicalResolution(
-            str(chem.id),
-            chem.english_name,
-            chem.cas,
-            chem.persian_name,
-            0.85,
-            "partial_unique",)
+            return self._resolution(chem, "partial_unique", 0.85)
         return None

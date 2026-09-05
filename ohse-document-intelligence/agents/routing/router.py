@@ -64,10 +64,10 @@ class QueryRouter:
             return results
 
         if agent_name == "formula":
-            f = self.formula.execute(intent, slots)
+            f = self.formula.execute(intent, slots, query=query)
             results["formula"] = f.to_dict()
             return results
 
-        sem = self.semantic.execute(query)
+        sem = self.semantic.execute(query, slots=slots)
         results["semantic"] = sem.to_dict()
         return results
