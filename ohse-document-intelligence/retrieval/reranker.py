@@ -59,6 +59,128 @@ def _normalize(text: str) -> set[str]:
     return {w for w in t.split() if len(w) > 1}
 
 
+def _cas_hits(query: str, text: str, metadata: dict[str, Any]) -> bool:
+    from retrieval.evidence_candidates import extract_cas_values
+
+    slots = metadata.get("slots") if isinstance(metadata.get("slots"), dict) else {}
+    q_cas = set(extract_cas_values(query, slots.get("cas")))
+    if not q_cas:
+        return False
+    blob = " ".join(
+        str(x)
+        for x in (text, metadata.get("cas"), metadata.get("content"), metadata.get("chunk_id"))
+        if x
+    )
+    return bool(q_cas & set(extract_cas_values(blob)))
+
+
+def _field_hits(query: str, text: str, metadata: dict[str, Any]) -> bool:
+    from retrieval.evidence_candidates import FIELD_TOKEN_GROUPS, requested_fields
+
+    fields = requested_fields(query, metadata.get("slots") if isinstance(metadata.get("slots"), dict) else None)
+    rec_field = str(metadata.get("field") or "").lower()
+    blob = f"{text} {rec_field}".lower()
+    for field in fields:
+        if rec_field and (rec_field == field or rec_field.replace("/", "_") == field):
+            return True
+        tokens = FIELD_TOKEN_GROUPS.get(field, ())
+        if any(tok in blob for tok in tokens):
+            return True
+    return False
+
+
+def _slots_of(metadata: dict[str, Any]) -> dict[str, Any]:
+    slots = metadata.get("slots")
+    return slots if isinstance(slots, dict) else {}
+
+
+def _identity_hits(query: str, text: str, metadata: dict[str, Any]) -> bool:
+    from retrieval.evidence_candidates import identity_matches
+
+    payload = dict(metadata or {})
+    payload.setdefault("content", text)
+    return identity_matches(query, payload, _slots_of(metadata))
+
+
+def _explicit_field_identity_match(query: str, cand: RankedCandidate) -> bool:
+    from retrieval.evidence_candidates import requested_fields
+
+    meta = cand.metadata or {}
+    slots = _slots_of(meta)
+    if not requested_fields(query, slots):
+        return False
+    text = cand.content
+    if meta.get("enriched_content"):
+        text = str(meta["enriched_content"])
+    if not _identity_hits(query, text, meta):
+        return False
+    if not _field_hits(query, text, meta):
+        return False
+    et = str(meta.get("evidence_type") or meta.get("source_type") or "")
+    return et in {"structured", "row_knowledge"}
+
+
+def _formula_identity_match(query: str, cand: RankedCandidate) -> bool:
+    from retrieval.evidence_candidates import is_formula_query
+
+    meta = cand.metadata or {}
+    if not is_formula_query(query, _slots_of(meta)):
+        return False
+    et = str(meta.get("evidence_type") or meta.get("source_type") or "")
+    return et == "formula" or bool(meta.get("formula_id"))
+
+
+class EvidenceReranker(Reranker):
+    """Preserve vector order unless the query is an explicit field+identity (or formula) lookup."""
+
+    name = "evidence_identity"
+
+    def rerank(self, query: str, candidates: list[RankedCandidate], *, top_k: int = 5) -> list[RankedCandidate]:
+        row_identity: list[RankedCandidate] = []
+        field_identity: list[RankedCandidate] = []
+        formula_hits: list[RankedCandidate] = []
+        rest: list[RankedCandidate] = []
+        for cand in candidates:
+            meta = cand.metadata or {}
+            et = str(meta.get("evidence_type") or meta.get("source_type") or "")
+            text = cand.content
+            if meta.get("enriched_content"):
+                text = str(meta["enriched_content"])
+            if et == "row_knowledge" and _identity_hits(query, text, meta):
+                cand.rerank_score = 1.0
+                row_identity.append(cand)
+            elif _explicit_field_identity_match(query, cand):
+                cand.rerank_score = 1.0
+                field_identity.append(cand)
+            elif _formula_identity_match(query, cand):
+                cand.rerank_score = 1.0
+                formula_hits.append(cand)
+            else:
+                cand.rerank_score = cand.score
+                rest.append(cand)
+        row_identity.sort(
+            key=lambda cand: 0 if str(cand.chunk_id).startswith("row_table_") else 1
+        )
+        chosen_row = row_identity[:1]
+        if chosen_row and candidates:
+            from retrieval.evidence_candidates import identity_lookup_patterns
+
+            top = candidates[0]
+            top_meta = top.metadata or {}
+            patterns = identity_lookup_patterns(query, _slots_of(top_meta))
+            top_blob = f"{top.content} {top_meta.get('cas') or ''} {top_meta.get('chemical_name') or ''}".lower()
+            if patterns and any(str(pattern).lower() in top_blob for pattern in patterns):
+                chosen_row = []
+        return (chosen_row + field_identity + formula_hits + rest)[:top_k]
+
+    def info(self) -> RerankerMetrics:
+        return RerankerMetrics(
+            model_name=self.name,
+            model_size_mb=0.0,
+            installation="built-in (field+identity promote; otherwise vector order)",
+        )
+
+
 class LexicalReranker(Reranker):
     """Local token-overlap reranker (no external deps)."""
 

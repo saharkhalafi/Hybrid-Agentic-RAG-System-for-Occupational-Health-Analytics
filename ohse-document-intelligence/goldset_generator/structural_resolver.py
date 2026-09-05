@@ -176,6 +176,7 @@ from goldset_generator.row_visual_band import (
 from goldset_generator.table_detection_gate import (
     evaluate_table_detection,
     has_chemical_oel_signatures,
+    looks_like_oel_table_page,
 )
 
 from ingestion.table_recovery import (
@@ -1113,6 +1114,55 @@ def _document_ai_table_quality_poor(
     return False
 
 
+def _dai_oel_grid_repairable_in_place(
+    table: ExtractedTableRecord,
+) -> bool:
+    """True when Document AI already has an OEL grid overlay can repair.
+
+    Header CAS pollution or incomplete CAS-in-table counts still mark
+    quality as poor, but replacing a 6+/7-column STEL/TWA grid with a
+    PyMuPDF rebuild destroys cloned/spanned limit geometry that
+    TableGoldGenerator._overlay_pdf_stel_twa is designed to fix.
+    Collapsed tables (<6 columns, no limit headers, no data rows) are
+    not repairable in place.
+    """
+
+    schema = _oel_schema_signals(table)
+
+    if schema.get("physical_column_count", 0) < 6:
+        return False
+
+    if float(schema.get("header_score") or 0) < 0.30:
+        return False
+
+    has_limit_structure = bool(
+        schema.get("has_both_limit_headers")
+        or _needs_oel_limit_column_expansion(table)
+        or _needs_oel_basis_symbols_expansion(table)
+    )
+    if not has_limit_structure:
+        return False
+
+    data_rows = table.rows[1:] if len(table.rows or []) > 1 else []
+    if not data_rows:
+        return False
+
+    if not any(_row_non_empty_count(row) >= 2 for row in data_rows):
+        return False
+
+    nonempty = [
+        cell
+        for row in data_rows
+        for cell in row
+        if str(getattr(cell, "text", "") or "").strip()
+    ]
+    if not nonempty:
+        return False
+    boxed = sum(1 for cell in nonempty if is_valid_bbox(getattr(cell, "bbox", None)))
+    # Overlay repairs cloned/spanned limit geometry; it cannot invent boxes.
+    return boxed / len(nonempty) >= 0.5
+
+
 def _needs_pymupdf_recovery(
     page_text: str,
     tables: list[ExtractedTableRecord],
@@ -1121,6 +1171,7 @@ def _needs_pymupdf_recovery(
     Determine whether PyMuPDF recovery is necessary.
 
     Only OEL tables can trigger OEL-specific recovery.
+    Do not replace a usable DAI OEL grid solely because quality is poor.
     """
 
     if not tables:
@@ -1147,6 +1198,9 @@ def _needs_pymupdf_recovery(
             table,
         )
         and not _needs_oel_basis_symbols_expansion(
+            table,
+        )
+        and not _dai_oel_grid_repairable_in_place(
             table,
         )
         for table in oel_tables
@@ -3300,8 +3354,9 @@ def resolve_structure(
                 ]
 
             is_oel_page = (
-                has_chemical_oel_signatures(
-                    page_text
+                looks_like_oel_table_page(
+                    page_text,
+                    page_num,
                 )
             )
 

@@ -618,6 +618,8 @@ def pdf_identity_fill_fields(row: list[Any], page_width: float) -> set[str]:
     fields: set[str] = set()
     if empty_stel and empty_twa:
         fields.update({"STEL", "TWA"})
+    if empty_stel and not empty_twa:
+        fields.add("STEL")
     if box_stel and _physical_column_of_bbox(box_stel, page_width) == 4:
         fields.update({"STEL", "TWA"})
     if box_twa and _physical_column_of_bbox(box_twa, page_width) == 4:
@@ -799,7 +801,18 @@ class TableGoldGenerator:
         geometry_replace = pdf_geometry_untrusted_fields(row, page_width)
         identity_replace = pdf_identity_fill_fields(row, page_width)
         replace = geometry_replace | identity_replace
-        if not replace:
+        dai_stel = _decimal_token(
+            (row_data.get("STEL") or {}).get("value")
+            or (row_data.get("STEL") or {}).get("original_value"),
+            "STEL",
+        )
+        dai_twa = _decimal_token(
+            (row_data.get("TWA") or {}).get("value")
+            or (row_data.get("TWA") or {}).get("original_value"),
+            "TWA",
+        )
+        dai_complete = dai_stel is not None and dai_twa is not None
+        if not replace and not dai_complete:
             return
         from ingestion.table_recovery import WordToken, recover_stel_twa_from_words
 
@@ -824,33 +837,30 @@ class TableGoldGenerator:
                 row_no = int(float(str(row_no_token).strip().replace(",", "")))
             except (TypeError, ValueError):
                 row_no = None
-        dai_stel = _decimal_token(
-            (row_data.get("STEL") or {}).get("value")
-            or (row_data.get("STEL") or {}).get("original_value"),
-            "STEL",
-        )
-        dai_twa = _decimal_token(
-            (row_data.get("TWA") or {}).get("value")
-            or (row_data.get("TWA") or {}).get("original_value"),
-            "TWA",
-        )
-        dai_complete = dai_stel is not None and dai_twa is not None
         band = _row_limit_y_band(row, page_width)
         identity_ok = bool(band) and pdf_row_identity_matches(
             words, page_width, band[0], band[1], row_no
         )
         if not identity_ok:
             anchored = pdf_unique_row_number_y_span(words, page_width, row_no)
-            if anchored is not None and (identity_replace or not dai_complete):
+            if anchored is not None and (
+                identity_replace or not dai_complete or geometry_replace or not replace
+            ):
                 band = anchored
             elif band is None or not geometry_replace or dai_complete:
                 return
             else:
                 replace = geometry_replace
+        if band is None:
+            return
         recovered = recover_stel_twa_from_words(words, page_width, band[0], band[1])
         pdf_stel = _decimal_token(recovered.get("STEL"), "STEL")
         pdf_twa = _decimal_token(recovered.get("TWA"), "TWA")
-        if dai_complete:
+        if not replace:
+            if not pdf_overrides_complete_dai_limits(dai_stel, dai_twa, pdf_stel, pdf_twa):
+                return
+            replace = {"STEL", "TWA"}
+        elif dai_complete and not geometry_replace:
             if not pdf_overrides_complete_dai_limits(dai_stel, dai_twa, pdf_stel, pdf_twa):
                 return
         for field in ("STEL", "TWA"):

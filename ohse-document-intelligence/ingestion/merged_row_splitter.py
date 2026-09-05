@@ -1423,25 +1423,6 @@ def _pick_limit_cluster(
                 <= abs(target_x - anchors[1])
                 else 1
             )
-            print(
-    "DEBUG LIMIT CLUSTERS:",
-    {
-        "anchors": anchors,
-        "target_x": target_x,
-        "limit_slot": limit_slot,
-        "assigned": {
-            slot: {
-                "center": _cluster_x_center(cluster),
-                "text": [
-                    word[4]
-                    for word in cluster
-                ],
-                "reconstructed": reconstruct_limit_expression_from_pdf_words(cluster),
-            }
-            for slot, cluster in assigned.items()
-        },
-    },
-)
             return assigned.get(requested)
 
         return assigned.get(limit_slot)
@@ -1533,50 +1514,60 @@ def _attach_nearby_unit_fragments(
     return selected + extra
 
 
+PHYSICAL_HEALTH_EFFECT_COLUMN = 0
+PHYSICAL_SYMBOLS_COLUMN = 1
+PHYSICAL_STEL_COLUMN = 2
+PHYSICAL_TWA_COLUMN = 3
+
+
+def _cell_physical_column(cell: Any) -> int | None:
+    column = getattr(cell, "column", None)
+    if column is None:
+        return None
+    try:
+        return int(column)
+    except (TypeError, ValueError):
+        return None
+
+
+def _limit_slot_from_physical_column(column: int | None) -> int | None:
+    if column == PHYSICAL_STEL_COLUMN:
+        return 0
+    if column == PHYSICAL_TWA_COLUMN:
+        return 1
+    return None
+
+
+def _is_symbols_or_health_effect_column(column: int | None) -> bool:
+    return column in {
+        PHYSICAL_HEALTH_EFFECT_COLUMN,
+        PHYSICAL_SYMBOLS_COLUMN,
+    }
+
+
 def _infer_limit_column_indices(
     row: list[Any],
     cas_column_index: int | None,
     page=None,
 ) -> list[int]:
+    """
+    Return list positions of STEL/TWA cells by physical cell.column.
+
+    Physical column 2 is STEL/C. Physical column 3 is TWA.
+    List order is never used to decide ownership: a row may omit
+    column 2, in which case the cell at list index 2 is not STEL.
+    """
+
+    del page
     indices: list[int] = []
     for index, cell in enumerate(row):
         if index == cas_column_index:
             continue
-        if _cell_looks_like_limit(cell):
-            indices.append(index)
-    if not indices:
-        return []
-    first, last = min(indices), max(indices)
-    if first > 0 and first - 1 != cas_column_index:
-        left_text = str(getattr(row[first - 1], "text", "") or "").strip()
-        if (
-            left_text in {"", "-", "—", "–"}
-            or _da_limit_text_is_corrupted(left_text)
-        ) and (first - 1) not in indices:
-            indices.append(first - 1)
-    if last + 1 < len(row) and last + 1 != cas_column_index:
-        right_text = str(getattr(row[last + 1], "text", "") or "").strip()
-        if (
-            right_text in {"", "-", "—", "–"}
-            or _da_limit_text_is_corrupted(right_text)
-        ) and (last + 1) not in indices:
-            indices.append(last + 1)
-    indices = sorted(set(indices))[:2]
-    headers = _header_column_anchors(page)
-    if (
-        len(indices) == 1
-        and headers
-        and indices[0] > 0
-        and indices[0] - 1 != cas_column_index
-    ):
-        cell_x = _cell_x_center(row[indices[0]])
-        if (
-            cell_x is not None
-            and abs(cell_x - headers["twa"]) < abs(cell_x - headers["stel"])
-            and (indices[0] - 1) not in indices
-        ):
-            indices = sorted([indices[0] - 1, indices[0]])
-    return indices[:2]
+        slot = _limit_slot_from_physical_column(_cell_physical_column(cell))
+        if slot is None:
+            continue
+        indices.append(index)
+    return sorted(indices, key=lambda index: _cell_physical_column(row[index]) or 0)
 
 
 def _split_limit_cell_from_pdf(
@@ -1730,6 +1721,8 @@ def _resolve_column_role(
         return "stel"
     if limit_slot == 1:
         return "twa"
+    if _is_symbols_or_health_effect_column(_cell_physical_column(cell)):
+        return None
     headers = _header_column_anchors(page) if page is not None else None
     cell_x = _cell_x_center(cell)
     bbox = _cell_bbox(cell)
@@ -1783,6 +1776,15 @@ def _split_nonchemical_cell_by_geometry(
         if original_text is not None
         else ""
     )
+
+    if (
+        _is_symbols_or_health_effect_column(_cell_physical_column(cell))
+        and limit_slot is None
+        and column_role not in {"stel", "twa", "mw"}
+        and count == 1
+        and original_text.strip()
+    ):
+        return [original_text]
 
     role = column_role or _resolve_column_role(cell, page, limit_slot)
     headers = _header_column_anchors(page) if page is not None else None
@@ -2246,25 +2248,6 @@ def _split_row_by_cas_geometry(
     # CAS Y-groups are visual lines inside a name cell, not table rows.
     # Split only when Document AI packed multiple measured limit values
     # into a non-chemical cell (true merged physical rows).
-    print(
-    "DEBUG CAS SPLIT DECISION:",
-    {
-        "row_cas": row_cas,
-        "groups": groups,
-        "cas_column_index": cas_column_index,
-        "chemical_text": getattr(chemical_cell, "text", "") or "",
-        "all_inside": _all_cas_inside_chemical_cell_bbox(
-            chemical_cell,
-            row_cas,
-            cas_geometry,
-            y_threshold=y_threshold,
-        ),
-        "nonchemical_multi_limit": _da_nonchemical_cells_have_multiple_measured_values(
-            row,
-            cas_column_index,
-        ),
-    }
-)
     if (
         len(groups) > 1
         and _all_cas_inside_chemical_cell_bbox(
@@ -2308,6 +2291,10 @@ def _split_row_by_cas_geometry(
         cas_column_index,
         page=page,
     )
+    limit_slot_count = 2 if any(
+        _limit_slot_from_physical_column(_cell_physical_column(cell)) is not None
+        for cell in row
+    ) else len(limit_indices)
 
     # ------------------------------------------------------------------
     # Build physical rows.
@@ -2390,11 +2377,10 @@ def _split_row_by_cas_geometry(
             # OTHER COLUMNS
             # ==========================================================
 
-            limit_slot = (
-                limit_indices.index(column_index)
-                if column_index in limit_indices
-                else None
-            )
+            physical_col = _cell_physical_column(cell)
+            limit_slot = _limit_slot_from_physical_column(physical_col)
+            if _is_symbols_or_health_effect_column(physical_col):
+                limit_slot = None
 
             traces: list = []
             split_values = (
@@ -2405,7 +2391,7 @@ def _split_row_by_cas_geometry(
                     page=page,
                     y_threshold=y_threshold,
                     limit_slot=limit_slot,
-                    limit_slot_count=len(limit_indices),
+                    limit_slot_count=limit_slot_count,
                     trace_out=traces,
                 )
             )
@@ -2466,22 +2452,41 @@ def _split_row_by_cas_geometry(
                     )
 
             if value is None:
-
-                _clear_cell_value(
-                    new_cell
+                original_text = str(original_da_text or "").strip()
+                preserve_narrative = (
+                    _is_symbols_or_health_effect_column(physical_col)
+                    and len(groups) == 1
+                    and bool(original_text)
                 )
+                if preserve_narrative:
+                    if hasattr(new_cell, "text"):
+                        new_cell.text = original_da_text
+                    if hasattr(new_cell, "normalized_value"):
+                        new_cell.normalized_value = original_da_text
+                    if hasattr(new_cell, "normalized_text"):
+                        new_cell.normalized_text = original_da_text
+                    new_cell.source_reference[
+                        "physical_value_unresolved"
+                    ] = False
+                    new_cell.source_reference[
+                        "resolution_reason"
+                    ] = "preserved_extracted_symbols_or_health_effect"
+                else:
+                    _clear_cell_value(
+                        new_cell
+                    )
 
-                new_cell.source_reference[
-                    "physical_value_unresolved"
-                ] = True
+                    new_cell.source_reference[
+                        "physical_value_unresolved"
+                    ] = True
 
-                new_cell.source_reference[
-                    "resolution_reason"
-                ] = (
-                    "numeric_or_cell_value_"
-                    "could_not_be_assigned_"
-                    "safely_to_physical_row"
-                )
+                    new_cell.source_reference[
+                        "resolution_reason"
+                    ] = (
+                        "numeric_or_cell_value_"
+                        "could_not_be_assigned_"
+                        "safely_to_physical_row"
+                    )
 
             new_row.append(
                 new_cell

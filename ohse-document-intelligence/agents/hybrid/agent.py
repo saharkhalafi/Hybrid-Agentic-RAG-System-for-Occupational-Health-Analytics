@@ -73,9 +73,9 @@ class HybridAgent:
 
         if "formula" in agents:
             if slots.get("variables"):
-                f_res = self.formula.execute("FORMULA.CALCULATION.VIBRATION_AHV", slots)
+                f_res = self.formula.execute("FORMULA.CALCULATION.VIBRATION_AHV", slots, query=query)
             else:
-                f_res = self.formula.execute("FORMULA.LOOKUP.BY_ID", slots)
+                f_res = self.formula.execute("FORMULA.LOOKUP.BY_ID", slots, query=query)
             results["formula"] = f_res.to_dict()
             citations.extend(f_res.citations)
 
@@ -86,7 +86,7 @@ class HybridAgent:
                     parent_sess.close()
                 except Exception:
                     pass
-            sem_res = self.semantic.execute(query)
+            sem_res = self.semantic.execute(query, slots=slots)
             results["semantic"] = sem_res.to_dict()
             citations.extend(sem_res.citations)
 

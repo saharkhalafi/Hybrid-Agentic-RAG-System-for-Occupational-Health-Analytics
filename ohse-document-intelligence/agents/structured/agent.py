@@ -51,7 +51,7 @@ class StructuredAgent:
                 "STRUCTURED.OEL.CEILING_LOOKUP",
                 "STRUCTURED.OEL.BY_CAS",
             }:
-                oel_type = slots.get("oel_type") or self._oel_from_intent(intent)
+                oel_type = slots.get("oel_type") or slots.get("requested_field") or self._oel_from_intent(intent)
                 return self._oel_lookup(slots, oel_type, t0)
             if intent == "STRUCTURED.OEL.ALL_LIMITS_LOOKUP":
                 return self._all_limits(slots, t0)
@@ -64,6 +64,8 @@ class StructuredAgent:
             return "STEL"
         if "CEILING" in intent:
             return "CEILING"
+        if "MOLECULAR" in intent:
+            return "MOLECULAR_WEIGHT"
         return "TWA"
 
     def _oel_lookup(self, slots: dict[str, Any], oel_type: str, t0: float) -> StructuredAgentResult:
@@ -170,9 +172,19 @@ class StructuredAgent:
         )
         if not mw or mw.get("molecular_weight") is None:
             return StructuredAgentResult(success=False, error="no_data", latency_ms=_ms(t0))
+        citations: list[dict[str, Any]] = []
+        if mw.get("source") == "oel_original_values":
+            citations = [{
+                "source_type": "structured",
+                "table": "oel_chemical_limits",
+                "source_row_key": mw.get("source_row_key"),
+                "page_number": mw.get("page_number"),
+                "authority": "postgresql",
+            }]
         return StructuredAgentResult(
             success=True,
             data=mw,
+            citations=citations,
             latency_ms=_ms(t0),
         )
 
@@ -180,13 +192,24 @@ class StructuredAgent:
         res = self._oel_lookup(slots, "TWA", t0)
         if not res.success:
             return res
+        data = {
+            "source_row_key": res.data.get("source_row_key"),
+            "page_number": res.data.get("page_number"),
+            "cell_id": res.data.get("cell_id"),
+            "cas": res.data.get("cas"),
+            "chemical_name": res.data.get("chemical_name"),
+        }
+        for key in ("symbols", "health_effect"):
+            if res.data.get(key) not in (None, ""):
+                data[key] = res.data.get(key)
+        notation = " ".join(
+            str(data[key]) for key in ("symbols", "health_effect") if data.get(key)
+        )
+        if notation:
+            data["original_value"] = notation
         return StructuredAgentResult(
             success=True,
-            data={
-                "source_row_key": res.data.get("source_row_key"),
-                "page_number": res.data.get("page_number"),
-                "cell_id": res.data.get("cell_id"),
-            },
+            data=data,
             citations=res.citations,
             latency_ms=_ms(t0),
         )

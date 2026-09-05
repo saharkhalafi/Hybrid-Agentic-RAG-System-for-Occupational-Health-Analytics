@@ -1003,6 +1003,34 @@ def test_valid_stel_with_empty_twa_does_not_need_pdf_overlay():
     assert pdf_limit_replace_fields(row, page_width) == set()
 
 
+def test_empty_stel_with_twa_needs_pdf_stel_fill():
+    from goldset_generator.table_gold_generator import pdf_limit_replace_fields
+
+    page_width = 694.8
+    row = [
+        {"column": 2, "text": "", "bbox": None},
+        {
+            "column": 3,
+            "text": "20 ppm",
+            "bbox": {"x": 327.17, "y": 167.57, "width": 17.83, "height": 11.03},
+        },
+    ]
+    assert pdf_limit_replace_fields(row, page_width) == {"STEL"}
+    from goldset_generator.table_gold_generator import pdf_limit_replace_fields
+
+    page_width = 694.8
+    row = [
+        {"column": 2, "text": "C0.05 ppm", "bbox": None},
+        {"column": 3, "text": "", "bbox": None},
+        {
+            "column": 4,
+            "text": "56.06",
+            "bbox": {"x": 391.75, "y": 352.51, "width": 2.63, "height": 12.66},
+        },
+    ]
+    assert pdf_limit_replace_fields(row, page_width) == set()
+
+
 def test_pdf_words_recover_empty_dai_row_and_mw_spilled_twa():
     from ingestion.table_recovery import WordToken, recover_stel_twa_from_words
     from pipeline_contracts.numeric_integrity import parse_numeric_cell
@@ -1107,9 +1135,33 @@ def test_pdf_overrides_dai_only_when_same_numbers_are_column_swapped():
         Decimal("20"), Decimal("40"), Decimal("40"), Decimal("20")
     )
     assert not pdf_overrides_complete_dai_limits(
+        Decimal("20"), Decimal("40"), Decimal("20"), Decimal("40")
+    )
+    assert not pdf_overrides_complete_dai_limits(
         Decimal("2"), Decimal("6"), None, Decimal("0.5")
     )
     assert not pdf_overrides_complete_dai_limits(
         Decimal("2"), Decimal("1"), Decimal("0.2"), Decimal("0.1")
     )
     assert pdf_overrides_complete_dai_limits(None, Decimal("1"), Decimal("2"), Decimal("1"))
+
+
+def test_untrusted_geometry_overlays_complete_dai_pair():
+    """Cloned STEL/TWA bboxes stay overlay-eligible even when both DAI values parsed."""
+    from goldset_generator.table_gold_generator import (
+        pdf_geometry_untrusted_fields,
+        pdf_overrides_complete_dai_limits,
+    )
+    from pipeline_contracts.numeric_integrity import parse_numeric_cell
+
+    page_width = 694.8
+    cloned = {"x": 327.17, "y": 167.57, "width": 17.83, "height": 11.03}
+    row = [
+        {"column": 2, "text": "20 ppm", "bbox": cloned},
+        {"column": 3, "text": "40ppm", "bbox": dict(cloned)},
+    ]
+    assert pdf_geometry_untrusted_fields(row, page_width) == {"STEL", "TWA"}
+    dai_stel = parse_numeric_cell("20 ppm", field_type="STEL").normalized_value
+    dai_twa = parse_numeric_cell("40ppm", field_type="TWA").normalized_value
+    assert dai_stel is not None and dai_twa is not None
+    assert not pdf_overrides_complete_dai_limits(dai_stel, dai_twa, dai_stel, dai_twa)

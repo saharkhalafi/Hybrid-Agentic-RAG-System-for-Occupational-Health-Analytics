@@ -26,6 +26,15 @@ _CONVERSATIONAL_OFF_TOPIC = re.compile(
     r"don't\s*want|feeling\s*down|i\s*am\s*sad|not\s*interested)",
     re.IGNORECASE,
 )
+# Meaning / definition of a limit type — not a numeric field lookup.
+_LIMIT_TYPE_CONCEPT = re.compile(
+    r"(یعنی|چیست|چیه|تعریف|معنا|چه مفهوم|توضیح)",
+)
+_OEL_TYPE_TOKEN = re.compile(r"\b(TWA|STEL|CEILING|OEL)\b", re.IGNORECASE)
+# Clauses that discuss OEL/limit concepts rather than requesting TWA/STEL/Ceiling.
+_LIMIT_CONCEPT_PREDICATE = re.compile(
+    r"(شامل|تعیین|می‌شود|میشود|کرده|معنا|توضیح|چرا|چگونه|تفاوت|یعنی)",
+)
 
 
 @dataclass
@@ -102,11 +111,12 @@ class IntentClassifier:
         if _CONVERSATIONAL_OFF_TOPIC.search(q):
             return self._result("GUARDRAIL.PROFESSIONAL_JUDGMENT", 0.88, slots, trace)
 
-        # Guardrail patterns
-        if re.search(r"(اخراج|تعلیق|بیمار|تشخیص بیماری|اخراج کنم)", q):
+        # Guardrail patterns. "بیمار" is a whole token (HR/clinical person), not a
+        # substring of "بیماری" (disease as document content).
+        if re.search(r"(اخراج|تعلیق|تشخیص بیماری|اخراج کنم|\bبیمار\b)", q):
             return self._result("GUARDRAIL.PROFESSIONAL_JUDGMENT", 0.9, slots, trace)
 
-        if re.search(r"\b(1[3-9]|[2-9]\d)\s*ساعت", q) and re.search(r"حد|مواجهه", q):
+        if re.search(r"\b(1[3-9]|[2-9]\d)\s*ساعت", q) and re.search(r"\bحد\b|مواجهه", q):
             return self._result("GUARDRAIL.UNSAFE_EXTRAPOLATION", 0.9, slots, trace)
 
         # Invalid formula calculation inputs: non-numeric value assigned to a
@@ -139,8 +149,8 @@ class IntentClassifier:
         # Hybrid (multi-intent markers) — numeric lookup + explanation in one query.
         # Broadened to match "X چقدر است و TWA یعنی چی؟" where the definition marker
         # is not immediately adjacent to "و" (e.g. separated by the OEL-type token).
-        has_numeric_lookup_marker = re.search(r"(حد|چقدر|چنده)", q)
-        has_definition_marker = re.search(r"(یعنی|چیست|چیه|تعریف|چه مفهوم|توضیح)", q)
+        has_numeric_lookup_marker = re.search(r"(\bحد\b|چقدر|چنده)", q)
+        has_definition_marker = _LIMIT_TYPE_CONCEPT.search(q)
         has_conjunction = re.search(r"\sو\s", q)
         if has_numeric_lookup_marker and has_definition_marker and has_conjunction:
             return self._result("HYBRID.LOOKUP_AND_EXPLAIN", 0.88, slots, trace)
@@ -149,7 +159,9 @@ class IntentClassifier:
         if re.search(r"مقایسه", q) and re.search(r"\bTWA\b", q, re.I) and re.search(r"\b(STEL|Ceiling)\b", q, re.I):
             return self._result("HYBRID.LOOKUP_COMPARE_EXPLAIN", 0.86, slots, trace)
 
-        if re.search(r"ppm|مواجهه|غلظت", q, re.I) and re.search(r"(بیشتر|مقایسه|نسبت|مجاز)", q):
+        # Compare/over-limit: "مجاز" alone is not a cue — it appears in the OEL
+        # noun phrase "حد مجاز مواجهه شغلی".
+        if re.search(r"ppm|مواجهه|غلظت", q, re.I) and re.search(r"(بیشتر|مقایسه|نسبت)", q):
             # STEL duration without explicit concentration → structured STEL, not hybrid
             if re.search(r"۱۵\s*دقیقه|15\s*min|STEL", q, re.I) and not re.search(r"\d+\s*ppm", q, re.I):
                 if slots.get("chemical_name") or slots.get("cas"):
@@ -209,9 +221,20 @@ class IntentClassifier:
         calc_attempt_with_content = bool(
             re.search(r"(با\s|with\s|=|default|ahv\s*=|ورودی)", q, re.I)
         )
-        if calc_input_pattern or slots.get("variables") or re.search(
-            r"ahv|محاسبه|حساب کن|mohasebe|compute|calculate", q, re.I
-        ):
+        has_numeric_calc_evidence = bool(calc_input_pattern or slots.get("variables"))
+        # "فرمول محاسبه X چیست؟" is a formula-identity lookup, not a request to
+        # run AHV with missing inputs. Reuse the same definition markers as
+        # earlier rules; only treat as calculation when numeric evidence exists.
+        asks_formula_identity = bool(
+            re.search(r"(فرمول|formula_|رابطه)", q, re.I)
+            and (has_definition_marker or re.search(r"(معتبر|بازه)", q))
+        )
+        if (
+            has_numeric_calc_evidence
+            or re.search(
+                r"ahv|محاسبه|حساب کن|mohasebe|compute|calculate", q, re.I
+            )
+        ) and not (asks_formula_identity and not has_numeric_calc_evidence):
             # A calculation is requested for a specific formula that is not the
             # only executable one — unsupported, regardless of the exact variable
             # names used (registry-only formulas cannot be deterministically run).
@@ -231,18 +254,27 @@ class IntentClassifier:
                 return self._result("FORMULA.CALCULATION.UNSUPPORTED", 0.85, slots, trace)
 
         if re.search(r"فرمول|formula_", q, re.I):
-            return self._result("FORMULA.LOOKUP.BY_ID", 0.82, slots, trace)
+            if formula_id_match or slots.get("formula_id") or re.search(r"formula_\d+", q, re.I):
+                return self._result("FORMULA.LOOKUP.BY_ID", 0.82, slots, trace)
+            # No explicit formula_id: do not invent one (FormulaAgent defaults
+            # ID-less LOOKUP.BY_ID to formula_240_01). Retrieve the formula text.
+            return self._result("SEMANTIC.EXPLANATION.CONCEPT", 0.78, slots, trace)
 
         # Semantic definitions (before structured numeric — «TWA یعنی چی؟» is definition not lookup)
         if re.search(r"BEI|زیستی|بیولوژ", q, re.I):
             return self._result("SEMANTIC.DEFINITION.BEI", 0.85, slots, trace)
-        if re.search(r"(یعنی|چیست|چیه|تعریف)", q) and re.search(r"\bTWA\b", q, re.I):
+        if _LIMIT_TYPE_CONCEPT.search(q) and _OEL_TYPE_TOKEN.search(q):
+            type_hits = _OEL_TYPE_TOKEN.findall(q)
+            distinct_types = {t.upper() for t in type_hits}
+            if len(distinct_types) >= 2 and not (slots.get("chemical_name") or slots.get("cas")):
+                return self._result("SEMANTIC.EXPLANATION.CONCEPT", 0.82, slots, trace)
+        if _LIMIT_TYPE_CONCEPT.search(q) and re.search(r"\bTWA\b", q, re.I):
             return self._result("SEMANTIC.DEFINITION.TWA", 0.9, slots, trace)
-        if re.search(r"(یعنی|چیست|تعریف)", q) and re.search(r"\bSTEL\b", q, re.I):
+        if _LIMIT_TYPE_CONCEPT.search(q) and re.search(r"\bSTEL\b", q, re.I):
             return self._result("SEMANTIC.DEFINITION.STEL", 0.9, slots, trace)
-        if re.search(r"(یعنی|چیست|تعریف)", q) and re.search(r"Ceiling|سقف", q, re.I):
+        if _LIMIT_TYPE_CONCEPT.search(q) and re.search(r"Ceiling|سقف", q, re.I):
             return self._result("SEMANTIC.DEFINITION.CEILING", 0.88, slots, trace)
-        if re.search(r"(یعنی|چیست|تعریف)", q) and re.search(r"OEL|حد مجاز مواجهه", q, re.I):
+        if _LIMIT_TYPE_CONCEPT.search(q) and re.search(r"OEL|حد مجاز مواجهه", q, re.I):
             return self._result("SEMANTIC.DEFINITION.OEL", 0.88, slots, trace)
         if re.search(r"LAeq|صدا.*(یعنی|تعریف)", q, re.I):
             return self._result("SEMANTIC.DEFINITION.NOISE", 0.85, slots, trace)
@@ -280,6 +312,8 @@ class IntentClassifier:
 
         if re.search(r"\bSTEL\b|کوتاه.?مدت|۱۵ دقیقه", q, re.I):
             if not slots.get("chemical_name") and not slots.get("cas"):
+                if _LIMIT_TYPE_CONCEPT.search(q):
+                    return self._result("SEMANTIC.EXPLANATION.CONCEPT", 0.78, slots, trace)
                 return self._result("CLARIFY.MISSING_CHEMICAL", 0.9, slots, trace, clarify=True)
             return self._result("STRUCTURED.OEL.STEL_LOOKUP", 0.9, slots, trace)
 
@@ -292,8 +326,10 @@ class IntentClassifier:
             if re.match(r"^CAS\s*\??$", q, re.I):
                 return self._result("STRUCTURED.CHEMICAL.BY_NAME", 0.9, slots, trace)
 
-        if re.search(r"Ceiling|سقف|\bC\b", q, re.I) and re.search(r"حد", q):
+        if re.search(r"Ceiling|سقف|\bC\b", q, re.I) and re.search(r"\bحد\b", q):
             if not slots.get("chemical_name") and not slots.get("cas"):
+                if _LIMIT_TYPE_CONCEPT.search(q):
+                    return self._result("SEMANTIC.EXPLANATION.CONCEPT", 0.78, slots, trace)
                 return self._result("CLARIFY.MISSING_CHEMICAL", 0.9, slots, trace, clarify=True)
             return self._result("STRUCTURED.OEL.CEILING_LOOKUP", 0.88, slots, trace)
 
@@ -302,24 +338,31 @@ class IntentClassifier:
         # a longer query (e.g. containing an adversarial "not X" distractor or a
         # numeric-prefixed name our regex misses) almost always still names one.
         if re.search(r"\bTWA\b|میانگین وزنی", q, re.I) or re.search(r"\btwa\b.*داره|\btwa\b.*دارد", q, re.I):
-            if not slots.get("chemical_name") and not slots.get("cas") and len(q) < 25:
-                return self._result("CLARIFY.MISSING_CHEMICAL", 0.92, slots, trace, clarify=True)
+            if not slots.get("chemical_name") and not slots.get("cas"):
+                if _LIMIT_TYPE_CONCEPT.search(q):
+                    return self._result("SEMANTIC.DEFINITION.TWA", 0.86, slots, trace)
+                if len(q) < 25:
+                    return self._result("CLARIFY.MISSING_CHEMICAL", 0.92, slots, trace, clarify=True)
             return self._result("STRUCTURED.OEL.TWA_LOOKUP", 0.88, slots, trace)
 
-        if re.search(r"حد|چقدر|چنده", q) and slots.get("chemical_name") and not MW_PATTERN.search(q):
+        if re.search(r"\bحد\b|چقدر|چنده", q) and slots.get("chemical_name") and not MW_PATTERN.search(q):
             if re.search(r"همه|تمام|TWA و STEL", q):
                 return self._result("STRUCTURED.OEL.ALL_LIMITS_LOOKUP", 0.88, slots, trace)
             # No explicit OEL type in the query itself: "X چقدره؟" asks for a value
             # without specifying which one → return all limits. A bare "حد X؟"
             # with no value marker at all is genuinely ambiguous about which
             # limit type is wanted → ask for clarification instead of guessing TWA.
+            # Conceptual discussion of OEL/limits (not a field request) falls through
+            # to semantic retrieval even if a name was resolved.
             if not slots.get("oel_type"):
                 if re.search(r"چقدر|چنده", q):
                     return self._result("STRUCTURED.OEL.ALL_LIMITS_LOOKUP", 0.86, slots, trace)
-                return self._result("CLARIFY.MISSING_LIMIT_TYPE", 0.85, slots, trace, clarify=True)
-            return self._result("STRUCTURED.OEL.TWA_LOOKUP", 0.88, slots, trace)
+                if not _LIMIT_CONCEPT_PREDICATE.search(q):
+                    return self._result("CLARIFY.MISSING_LIMIT_TYPE", 0.85, slots, trace, clarify=True)
+            else:
+                return self._result("STRUCTURED.OEL.TWA_LOOKUP", 0.88, slots, trace)
 
-        if re.search(r"حد|چقدر|چنده", q):
+        if re.search(r"\bحد\b|چقدر|چنده", q):
             if not slots.get("chemical_name") and not slots.get("cas"):
                 if len(q) < 25:
                     return self._result("CLARIFY.MISSING_CHEMICAL", 0.92, slots, trace, clarify=True)
@@ -344,7 +387,7 @@ class IntentClassifier:
             return self._result("SEMANTIC.CONTEXT.SECTION", 0.75, slots, trace)
 
         # Short ambiguous
-        if len(q) < 20 and re.search(r"حد|چقدر|چنده|مجاز", q):
+        if len(q) < 20 and re.search(r"\bحد\b|چقدر|چنده|مجاز", q):
             return self._result("CLARIFY.MISSING_CHEMICAL", 0.85, slots, trace, clarify=True)
 
         # Unrecognized intent is not professional judgment. Preserve explicit

@@ -12,16 +12,26 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from database.models import DocumentChunk
-from retrieval.semantic_retrieval import SEMANTIC_LANGUAGE, SEMANTIC_SOURCE_TYPE, SEMANTIC_VALIDATION_STATUS
+from retrieval.semantic_retrieval import (
+    PRODUCTION_RETRIEVAL_LANGUAGES,
+    PRODUCTION_RETRIEVAL_SOURCE_TYPES,
+    SEMANTIC_VALIDATION_STATUS,
+    TEST_CHUNK_ID_PREFIX,
+)
 
 _PERSIAN_DIGITS = str.maketrans("۰۱۲۳۴۵۶۷۸۹", "0123456789")
-_TEST_CHUNK_PREFIX = "test_persian_"
+_TEST_CHUNK_PREFIX = TEST_CHUNK_ID_PREFIX
+
+
+_CAS_TOKEN = re.compile(r"\d{2,7}-\d{2}-\d")
 
 
 def _tokenize(text: str) -> list[str]:
     t = text.lower().translate(_PERSIAN_DIGITS)
+    cas_tokens = _CAS_TOKEN.findall(t)
+    t = _CAS_TOKEN.sub(" ", t)
     t = re.sub(r"[^\w\s\u0600-\u06FF]", " ", t, flags=re.UNICODE)
-    return [w for w in t.split() if len(w) > 1]
+    return cas_tokens + [w for w in t.split() if len(w) > 1]
 
 
 @dataclass
@@ -45,9 +55,9 @@ class LexicalIndex:
     def build_from_session(self, session: Session) -> int:
         rows = session.scalars(
             select(DocumentChunk).where(
-                DocumentChunk.source_type == SEMANTIC_SOURCE_TYPE,
+                DocumentChunk.source_type.in_(PRODUCTION_RETRIEVAL_SOURCE_TYPES),
                 DocumentChunk.validation_status == SEMANTIC_VALIDATION_STATUS,
-                DocumentChunk.language == SEMANTIC_LANGUAGE,
+                DocumentChunk.language.in_(PRODUCTION_RETRIEVAL_LANGUAGES),
             )
         ).all()
         self.docs = []
@@ -73,6 +83,12 @@ class LexicalIndex:
                     "topic": chunk.topic,
                     "section_id": chunk.section_id,
                     "enriched_content": enriched,
+                    "source_type": chunk.source_type,
+                    "evidence_type": chunk.source_type,
+                    "provenance": chunk.provenance,
+                    "source_row_key": (chunk.provenance or {}).get("source_row_key")
+                    if isinstance(chunk.provenance, dict)
+                    else None,
                 },
                 tf=tf,
                 length=len(tokens),

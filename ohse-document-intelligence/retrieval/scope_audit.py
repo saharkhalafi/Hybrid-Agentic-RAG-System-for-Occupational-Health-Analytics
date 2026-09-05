@@ -44,9 +44,9 @@ CORPUS_FILTERS: tuple[ScopeFilterSpec, ...] = (
     ),
     ScopeFilterSpec(
         name="exclude_test_chunks",
-        vector_stage="post_retrieval",
+        vector_stage="db_query",
         lexical_stage="index_build",
-        notes="test_persian_* prefix excluded in both paths",
+        notes="test_persian_* prefix excluded in ANN SQL and lexical index build",
     ),
 )
 

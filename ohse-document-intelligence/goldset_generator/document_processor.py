@@ -143,8 +143,10 @@ class ProcessedDocument:
         }
 
 
-def _find_cached_document_ai_raw(base_hash: str, start_page: int, end_page: int) -> Path | None:
-    """Locate cached Document AI raw JSON overlapping the requested page range."""
+def _find_all_cached_document_ai_raw(
+    base_hash: str, start_page: int, end_page: int
+) -> list[tuple[int, int, Path]]:
+    """Locate all cached Document AI raw JSON files overlapping the requested range."""
     settings = get_settings()
     prefix = base_hash[:12]
     pattern = re.compile(rf"^{re.escape(prefix)}_(\d+)-(\d+)_document_ai\.json$")
@@ -156,10 +158,27 @@ def _find_cached_document_ai_raw(base_hash: str, start_page: int, end_page: int)
         file_start, file_end = int(match.group(1)), int(match.group(2))
         if file_start <= end_page and file_end >= start_page:
             candidates.append((file_start, file_end, path))
+    return candidates
+
+
+def _find_cached_document_ai_raw(base_hash: str, start_page: int, end_page: int) -> Path | None:
+    """Locate cached Document AI raw JSON overlapping the requested page range."""
+    candidates = _find_all_cached_document_ai_raw(base_hash, start_page, end_page)
     if not candidates:
         return None
     candidates.sort(key=lambda item: (item[1] - item[0], -item[0]))
     return candidates[0][2]
+
+
+def _best_cache_for_page(
+    page_number: int,
+    caches: list[tuple[int, int, Path]],
+) -> tuple[int, int, Path] | None:
+    matching = [item for item in caches if item[0] <= page_number <= item[1]]
+    if not matching:
+        return None
+    matching.sort(key=lambda item: (item[1] - item[0], -item[0]))
+    return matching[0]
 
 
 class DocumentProcessor:
@@ -292,6 +311,56 @@ class DocumentProcessor:
 
         return tables, all_cells
 
+    def _layer1_from_merged_caches(
+        self,
+        caches: list[tuple[int, int, Path]],
+        *,
+        start_page: int,
+        end_page: int,
+        table_classifier,
+    ) -> tuple[list[ExtractedTableRecord], list[ExtractedCellRecord], dict[str, Any], str]:
+        """Load Layer 1 tables from every overlapping Document AI cache without an API call."""
+        page_to_cache: dict[int, tuple[int, int, Path]] = {}
+        for page_number in range(start_page, end_page + 1):
+            chosen = _best_cache_for_page(page_number, caches)
+            if chosen is not None:
+                page_to_cache[page_number] = chosen
+
+        by_path: dict[Path, tuple[int, int, set[int]]] = {}
+        for page_number, (file_start, file_end, path) in page_to_cache.items():
+            if path not in by_path:
+                by_path[path] = (file_start, file_end, set())
+            by_path[path][2].add(page_number)
+
+        tables: list[ExtractedTableRecord] = []
+        cells: list[ExtractedCellRecord] = []
+        merged_raw: dict[str, Any] = {"caches": []}
+        processor_format = "unknown"
+
+        for path, (file_start, _file_end, pages) in by_path.items():
+            raw_json = json.loads(path.read_text(encoding="utf-8"))
+            parsed = parse_document_ai_response(raw_json)
+            self._offset_pages(parsed, file_start)
+            processor_format = parsed.processor_format or processor_format
+            page_tables, page_cells = self._build_evidence_records(parsed, table_classifier)
+            tables.extend(t for t in page_tables if t.page_number in pages)
+            cells.extend(c for c in page_cells if c.page_number in pages)
+            merged_raw["caches"].append(
+                {
+                    "path": str(path),
+                    "page_start": file_start,
+                    "pages": sorted(pages),
+                }
+            )
+            logger.info(
+                "loaded_cached_document_ai_raw",
+                path=str(path),
+                cache_start=file_start,
+                pages=len(pages),
+            )
+
+        return tables, cells, merged_raw, processor_format
+
     def process(
         self,
         pdf_path: Path,
@@ -308,29 +377,31 @@ class DocumentProcessor:
             f"{loaded.content_hash}:{start_page}-{end_page}".encode()
         ).hexdigest()
 
-        subset_path = (
-            self.settings.data_intermediate_dir
-            / f"{loaded.content_hash[:12]}_{start_page}-{end_page}.pdf"
-        )
-        self._write_page_subset(pdf_path, subset_path, start_page, end_page)
-
         raw_json: dict[str, Any] = {}
         parsed: DocumentAIExtractionResult | None = None
+        tables: list[ExtractedTableRecord] = []
+        cells: list[ExtractedCellRecord] = []
+        processor_format = "unknown"
 
         if cached_raw_json and cached_raw_json.exists():
             raw_json = json.loads(cached_raw_json.read_text(encoding="utf-8"))
             parsed = parse_document_ai_response(raw_json)
             self._offset_pages(parsed, start_page)
         else:
-            auto_cached = _find_cached_document_ai_raw(loaded.content_hash, start_page, end_page)
-            if auto_cached:
-                logger.info("loading_cached_document_ai_raw", path=str(auto_cached))
-                raw_json = json.loads(auto_cached.read_text(encoding="utf-8"))
-                parsed = parse_document_ai_response(raw_json)
-                cache_match = re.search(r"_(\d+)-(\d+)_document_ai", auto_cached.name)
-                cache_start = int(cache_match.group(1)) if cache_match else start_page
-                self._offset_pages(parsed, cache_start)
+            caches = _find_all_cached_document_ai_raw(loaded.content_hash, start_page, end_page)
+            if caches:
+                tables, cells, raw_json, processor_format = self._layer1_from_merged_caches(
+                    caches,
+                    start_page=start_page,
+                    end_page=end_page,
+                    table_classifier=classify_table_text,
+                )
             elif not skip_document_ai:
+                subset_path = (
+                    self.settings.data_intermediate_dir
+                    / f"{loaded.content_hash[:12]}_{start_page}-{end_page}.pdf"
+                )
+                self._write_page_subset(pdf_path, subset_path, start_page, end_page)
                 processor = DocumentAIProcessor()
                 parsed, raw_json = processor.process_pdf(subset_path)
                 self._offset_pages(parsed, start_page)
@@ -360,10 +431,6 @@ class DocumentProcessor:
                 )
             )
         pdf_doc.close()
-
-        tables: list[ExtractedTableRecord] = []
-        cells: list[ExtractedCellRecord] = []
-        processor_format = "unknown"
 
         if parsed:
             processor_format = parsed.processor_format
