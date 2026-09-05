@@ -10,6 +10,10 @@ This is important because OEL tables contain bilingual RTL/LTR headers, merged c
 
 ### High-Level Architecture
 
+![Screenshot](https://github.com/saharkhalafi/Hybrid-Agentic-RAG-System-for-Occupational-Health-Analytics/blob/main/ohse-document-intelligence/docs/full%20a.png) 
+
+### Detailed Architecture
+![Screenshot](https://github.com/saharkhalafi/Hybrid-Agentic-RAG-System-for-Occupational-Health-Analytics/blob/main/ohse-document-intelligence/docs/detail%20a.png)
 
 ---
 
