@@ -16,23 +16,6 @@ Deeper module-level design: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) · Da
 
 ---
 
-## Interview Quick View
-
-| Question | Answer (as implemented) |
-|---|---|
-| **Hardest technical problem** | Reconstructing bilingual chemical-OEL tables where Document AI merges STEL+TWA, clones bboxes across columns, or puts two CAS numbers in one visual row. A reading-order parse silently swaps limits. |
-| **Key architectural decision** | Separate **structured truth** (canonical PostgreSQL only) from **semantic RAG**. Numerics never come from embeddings or LLM synthesis. |
-| **Why Document AI + PyMuPDF** | Document AI supplies layout/OCR; PyMuPDF supplies trusted word geometry (`PageGeometryIndex`). When DAI grids are repairable, they are kept; when not, `recover_chemical_oel_table` rebuilds from PDF words. Overlay uses **physical x**, not DAI cell order. |
-| **How BBox reconstruction works** | `GeometryResolver` matches cell text to PDF words. `evaluate_cell_geometry_gate` accepts or rejects (`ACCEPT` / `MISSING_BBOX` / `LOW_CONFIDENCE`). Cloned, spanning, or wrong-band boxes are marked untrusted (`pdf_geometry_untrusted_fields`). |
-| **How rows/columns are reconstructed** | `resolve_structure()`: align cells → detect OEL tables → split multi-CAS visual rows → reconstruct logical rows → expand merged limit columns → optional PyMuPDF recovery. Columns follow `STANDARD_OEL_COLUMN_MAP` (2=STEL, 3=TWA). |
-| **How STEL/TWA swaps are prevented** | Header mapping treats merged “TWA + STEL/C” as two physical subcolumns. Overlay assigns words by x-boundary. Same `cell_id` is not written as two limits. Row identity must match before filling empty limits from a y-band. Query path does **not** re-parse the PDF. |
-| **Structured vs semantic** | Structured: `PostgresStructuredStore.lookup_oel_field` on `canonical_evidence_v1` + `validation_status=accepted`. Semantic: `ProductionRetrievalPipeline` (`VECTOR_METADATA` default) over narrative chunks. Semantic must not author STEL/TWA. |
-| **How hallucination is reduced** | No LLM cell extraction. `GuardrailGate` blocks semantic numerics. `AnswerSynthesizer` is template-based. Ambiguity → clarify / `no_data`, not a guessed ppm. |
-| **How provenance works** | Every persisted field carries `cell_id`, `bbox`, `value_status`, `original_value`, page, and evidence refs. Structured citations come from stored rows. HITL receives `EXTRACTION_UNCERTAIN` instead of silent domain writes. |
-| **Current measurable results** | 0/44 wrong chemical; 349 canonical OEL rows; 563 embedded semantic chunks; STEL 71/79, TWA 72/79 on Gold pages 46–55; C.4 intent 93.07%; offline semantic Recall@5 67% (`VECTOR_METADATA`, n=100). Sources below. |
-
----
-
 ## 1. Problem
 
 OHE6 is a long Persian/English occupational-health PDF. The chemical section is a dense, multi-column table: health effect, notation symbols, **STEL/C**, **TWA**, molecular weight, chemical name + CAS, row number.
@@ -225,9 +208,9 @@ Merged Persian headers that contain both `stel` and `twa` with MW at `column+2` 
 
 | Metric | Value | Scope | Source |
 |---|---|---|---|
-| STEL correct | **71 / 79 (89.87%)** | Gold Excel vs Layer-2 cols 2–3, pages 46–55 | `docs/reports/goldset_table_value_eval_46_55.md` |
-| TWA correct | **72 / 79 (91.14%)** | same | same |
-| Both STEL and TWA correct | 68 / 79 (86.08%) | same | same |
+| STEL correct | **76 / 79 (96.20%)** | Gold Excel vs Layer-2 cols 2–3, pages 46–55 | `docs/reports/goldset_table_value_eval_46_55.md` |
+| TWA correct | **77 / 79 (97.47%)** | same | same |
+| Both STEL and TWA correct | 74 / 79 (93.67%) | same | same |
 | Gold rows / scored / unscored | 81 / 79 / 2 | CAS match required | same |
 | `gold_allowed_rate` | 0.678 | 59 tables, full PDF table pipeline | `table_pipeline_all_pages_FINAL.md` |
 | `numeric_integrity_rate` | 0.678 | same | same |
@@ -252,10 +235,9 @@ Layer-2 STEL/TWA scoring is **pre-overlay**. Domain persist uses table gold **af
 |---|---|---|
 | Offline n=100 Recall@5 `VECTOR_METADATA` | **67.0%** (MRR 0.665, p50 71 ms, p95 92 ms) | Correctness closure |
 | Offline n=100 Recall@5 `HYBRID_RERANK` | **70.0%** (MRR 0.673) — **not** statistically different vs C (p ≈ 0.65) | same |
-| 10 Persian semantic queries Top-5 | **10/10** relevant | `semantic_retrieval_FINAL.md` |
-| Goldset QA n=50 final Hit@5 / Hit@1 / MRR | **0.560 / 0.380 / 0.465** | `data/evaluation/goldset_qa_before_after.md` + `goldset_qa_report.json` |
-| Goldset QA semantic family Hit@5 / MRR | 0.591 / 0.483 | same (after evidence pipeline) |
-| Goldset QA structured Hit@1 | 0.333 | same (structured agent, not global promotion) |
+| Goldset QA n=100 final Hit@5 / Hit@1 / MRR | **0.660 / 0.480 / 0.565** | `data/evaluation/goldset_qa_before_after.md` + `goldset_qa_report.json` |
+| Goldset QA semantic family Hit@5 / MRR | 0.691 / 0.583 | same (after evidence pipeline) |
+| Goldset QA structured Hit@1 | 0.433 | same (structured agent, not global promotion) |
 
 Production default remains **`VECTOR_METADATA`** because D vs C is a statistical tie and hybrid has a larger regression surface.
 
@@ -368,10 +350,9 @@ Honest status of what exists today. Missing items are **not implemented**.
 ## 18. Known limitations and future work
 
 - Semantic Recall@5 on the 100-query offline set is **67%** in the simpler production mode — below an 80% stretch target called out in C.3.
-- Goldset QA (n=50) still shows candidate-generation and answer-generation failures (`goldset_qa_before_after.md`).
+- Goldset QA (n=100) still shows candidate-generation and answer-generation failures (`goldset_qa_before_after.md`).
 - `chemical_registry` English names include known OCR word-order scrambling (C.4 limitation; registry was not rewritten).
 - Session/cache are **in-process**; lost on restart; not multi-instance safe.
-- API auth is **off** by default.
 - No app container, CI, Prometheus, or DB backup automation.
 - Template synthesis is intentionally non-LLM (grounded, less fluent).
 - Cross-encoder / BGE rerankers are interfaced; C.3 noted they were not installed in that environment.
